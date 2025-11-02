@@ -1,11 +1,12 @@
 # Ghostty Android - Project Status
 
 **Created**: 2025-11-01
-**Phase**: Research & Planning
-**Status**: Foundation Established ✅
+**Phase**: Native Build System Implementation
+**Status**: Build System Complete ✅
 
 ## Completed Tasks
 
+### Phase 1: Foundation (Nov 1, 2025)
 - [x] Project initialized with Git repository
 - [x] MIT License added
 - [x] Comprehensive README with vision and roadmap
@@ -14,6 +15,16 @@
 - [x] Contributing guidelines
 - [x] Directory structure created
 - [x] Initial commit
+
+### Phase 2: Native Build System (Nov 1, 2025)
+- [x] Ghostty added as git submodule
+- [x] Nix development environment configured (shell.nix)
+- [x] Makefile build system created
+- [x] Android NDK libc configuration generation script
+- [x] Cross-compilation build script for Android ABIs
+- [x] Successfully built libghostty-vt.so for ARM64 (1.5MB)
+- [x] Research on Zig + Android NDK integration completed
+- [x] BUILD_SETUP.md documentation created
 
 ## Current State
 
@@ -24,41 +35,65 @@
 - **CONTRIBUTING.md**: Contribution workflow, code style, testing guidelines
 - **LICENSE**: MIT License
 
+### Build System ✅
+- **shell.nix**: Nix development environment with Android SDK/NDK auto-detection
+- **Makefile**: Build automation for multiple Android ABIs
+- **scripts/generate-android-libc.sh**: Generates Zig libc configuration for Android NDK
+- **scripts/build-android-abi.sh**: Cross-compiles libghostty-vt for specific Android ABI
+- **build/**: Generated libc configurations and build logs
+
+### Successfully Built ✅
+- **libghostty-vt.so for ARM64**: 1.5MB, aarch64-linux-android API 24
+- Output location: `android/app/src/main/jniLibs/arm64-v8a/libghostty-vt.so`
+
 ### Repository Structure ✅
 ```
 ghostty-android/
 ├── README.md
 ├── LICENSE
 ├── CONTRIBUTING.md
+├── STATUS.md
 ├── .gitignore
+├── shell.nix                    # Nix environment ✅
+├── Makefile                     # Build automation ✅
 ├── docs/
 │   ├── ARCHITECTURE.md
-│   └── BUILD.md
-├── libghostty-vt/     (empty - will contain Ghostty submodule)
-├── android/            (empty - will contain Android project)
-└── scripts/            (empty - will contain build scripts)
+│   ├── BUILD.md
+│   └── BUILD_SETUP.md          # Build system documentation ✅
+├── libghostty-vt/              # Ghostty submodule ✅
+├── android/
+│   └── app/src/main/jniLibs/
+│       └── arm64-v8a/
+│           └── libghostty-vt.so  # Built library ✅
+├── scripts/
+│   ├── generate-android-libc.sh  # NDK libc config ✅
+│   └── build-android-abi.sh      # Build script ✅
+└── build/
+    ├── android-arm64-v8a-libc.txt  # Generated config ✅
+    └── build-arm64-v8a.log         # Build log ✅
 ```
 
 ## Next Steps
 
 ### Immediate (This Week)
 
-1. **Add Ghostty as Submodule**
-   ```bash
-   git submodule add https://github.com/ghostty-org/ghostty.git libghostty-vt
-   ```
+1. ✅ ~~Add Ghostty as Submodule~~ **COMPLETED**
 
-2. **Research libghostty-vt C API**
-   - Clone Ghostty repository
-   - Examine `src/` for VT parser code
-   - Document C API functions
-   - Understand terminal state structures
+2. ✅ ~~Set Up Zig Cross-Compilation~~ **COMPLETED**
+   - Using Zig 0.15.2 from Ghostty's nix environment
+   - Android NDK integration working via libc configuration
+   - Successfully building for ARM64
 
-3. **Set Up Zig Cross-Compilation**
-   - Install Zig (0.13.0+)
-   - Configure Android NDK integration
-   - Create `build.zig` for cross-compilation
-   - Test basic compilation to ARM64
+3. **Build for Additional ABIs**
+   - [ ] Build for armeabi-v7a (32-bit ARM)
+   - [ ] Build for x86_64 (emulator support)
+   - [ ] Test `make build-native` (all ABIs)
+
+4. **Research libghostty-vt C API**
+   - [ ] Examine Ghostty's `src/` for VT parser API
+   - [ ] Document C API functions for JNI wrapper
+   - [ ] Understand terminal state structures
+   - [ ] Identify memory management requirements
 
 ### Short Term (Next 2 Weeks)
 
@@ -140,6 +175,22 @@ ghostty-android/
 - APK Size: <10MB
 - Startup: <500ms
 
+## Technical Breakthroughs
+
+### Zig + Android NDK Integration
+Successfully resolved cross-compilation challenges:
+
+1. **libc Configuration**: Discovered that `static_crt_dir` field is critical for linking with Clang runtime libraries
+2. **--libc Flag Usage**: The `--libc` command-line flag works correctly with `zig build`, while `ZIG_LIBC` environment variable does not
+3. **Clang Version Auto-Detection**: NDK r29 uses Clang 21, not 18 - script now auto-detects version
+4. **Library Naming**: Ghostty builds `libghostty-vt.so` (hyphen), not `libghostty_vt.so` (underscore)
+5. **SIMD Disabled**: `-Dsimd=false` is required to avoid C++ dependencies incompatible with Android's Bionic libc
+
+### Build Performance
+- **Build Time**: ~2 minutes (after nix cache populated)
+- **Output Size**: 1.5MB for ARM64 (ReleaseFast optimization)
+- **Dependencies**: All managed via Nix (Zig 0.15.2, Android tools)
+
 ## Open Questions
 
 - [ ] What is the exact libghostty-vt C API surface?
@@ -184,4 +235,5 @@ Even without ClaudeLink integration, this provides:
 ---
 
 **Last Updated**: 2025-11-01
-**Next Review**: After Zig cross-compilation setup
+**Next Review**: After researching libghostty-vt C API
+**Current Milestone**: Native Build System ✅ Complete

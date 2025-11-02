@@ -1,10 +1,14 @@
 # Zig
+.zig/
 zig-cache/
 zig-out/
 *.o
 *.a
 *.so
 *.dylib
+
+# Build artifacts
+build/
 
 # Android
 *.iml

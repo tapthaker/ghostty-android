@@ -81,14 +81,36 @@ Current Android terminal emulators typically use:
 - **Minimum SDK**: Android 7.0 (API 24) - Vulkan support
 - **Target SDK**: Android 14+ (API 34)
 
+## Quick Start
+
+**TL;DR - NixOS Users**:
+
+```bash
+nix-shell
+make android-studio  # Opens Android Studio → Build → Build APK
+```
+
+**TL;DR - Standard Linux**:
+
+```bash
+nix-shell
+make android  # One command to build and install
+```
+
+📖 **For detailed instructions, see [QUICK_START.md](QUICK_START.md)**
+⚠️ **NixOS users**: See [NIXOS_BUILD.md](docs/NIXOS_BUILD.md) for AAPT2 solutions
+
 ## Building from Source
 
 ### Prerequisites
 
-- Android SDK and NDK
-- Zig (latest stable)
-- JDK 17+
-- Android device or emulator
+- **Nix** (recommended) - provides all dependencies automatically
+- **OR** manual setup:
+  - Android SDK and NDK (r29+)
+  - Zig 0.15.2+
+  - JDK 17+
+  - Gradle 8.11+
+- Android device with USB debugging enabled
 
 ### Build Steps
 
@@ -96,6 +118,15 @@ Current Android terminal emulators typically use:
 # Clone the repository
 git clone https://github.com/yourusername/ghostty-android.git
 cd ghostty-android
+
+# Enter Nix development shell (recommended)
+nix-shell
+
+# NixOS: Use Android Studio
+make android-studio
+
+# Standard Linux: One-command build
+make android
 
 # Build libghostty-vt for Android
 ./scripts/build-native.sh

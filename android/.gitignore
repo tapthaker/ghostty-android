@@ -1,0 +1,18 @@
+# Gradle files
+.gradle/
+build/
+local.properties
+
+# Android Studio / IntelliJ
+*.iml
+.idea/
+.DS_Store
+captures/
+.externalNativeBuild
+.cxx
+
+# NDK
+obj/
+
+# Misc
+*.log

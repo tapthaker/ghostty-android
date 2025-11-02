@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ghostty_background">#FF1E1E2E</color>
+    <color name="ghostty_foreground">#FFCDD6F4</color>
+    <color name="ghostty_primary">#FF89B4FA</color>
+</resources>
