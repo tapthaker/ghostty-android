@@ -13,6 +13,37 @@ const c = @cImport({
 const jni = @import("jni_bridge.zig");
 const Renderer = @import("renderer.zig");
 
+// Custom logging function for Android
+fn androidLogFn(
+    comptime level: std.log.Level,
+    comptime scope: @TypeOf(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    const level_txt = comptime level.asText();
+    const prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+
+    var buf: [4096]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, level_txt ++ prefix ++ format, args) catch {
+        _ = c.__android_log_print(c.ANDROID_LOG_ERROR, "GhosttyRenderer", "Log format error");
+        return;
+    };
+
+    const android_level = switch (level) {
+        .err => c.ANDROID_LOG_ERROR,
+        .warn => c.ANDROID_LOG_WARN,
+        .info => c.ANDROID_LOG_INFO,
+        .debug => c.ANDROID_LOG_DEBUG,
+    };
+
+    _ = c.__android_log_print(android_level, "GhosttyRenderer", "%s", msg.ptr);
+}
+
+// Configure std.log to output to Android logcat
+pub const std_options: std.Options = .{
+    .logFn = androidLogFn,
+};
+
 // Android logging utilities
 // NOTE: liblog.so is loaded via DT_NEEDED (added by patchelf)
 const log = struct {

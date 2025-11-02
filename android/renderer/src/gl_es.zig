@@ -73,15 +73,22 @@ pub const Shader = struct {
         c.glGetShaderiv(self.id, c.GL_COMPILE_STATUS, &success);
 
         if (success == 0) {
-            var info_log: [512]u8 = undefined;
+            var info_log: [4096]u8 = undefined;
             var log_length: c.GLsizei = 0;
-            c.glGetShaderInfoLog(self.id, 512, &log_length, &info_log);
+            c.glGetShaderInfoLog(self.id, 4096, &log_length, &info_log);
 
-            const log_str = info_log[0..@intCast(log_length)];
-            log.err("Shader compilation failed ({s}):\n{s}", .{
+            log.err("Shader compilation failed ({s}) - shader id: {}", .{
                 @tagName(self.shader_type),
-                log_str
+                self.id,
             });
+
+            if (log_length > 0) {
+                const log_str = info_log[0..@intCast(log_length)];
+                log.err("Shader error log:\n{s}", .{log_str});
+            } else {
+                log.err("No shader info log available (log_length = 0)", .{});
+            }
+
             return error.ShaderCompileFailed;
         }
     }
@@ -114,12 +121,19 @@ pub const Program = struct {
         c.glGetProgramiv(self.id, c.GL_LINK_STATUS, &success);
 
         if (success == 0) {
-            var info_log: [512]u8 = undefined;
+            var info_log: [4096]u8 = undefined;
             var log_length: c.GLsizei = 0;
-            c.glGetProgramInfoLog(self.id, 512, &log_length, &info_log);
+            c.glGetProgramInfoLog(self.id, 4096, &log_length, &info_log);
 
-            const log_str = info_log[0..@intCast(log_length)];
-            log.err("Program linking failed:\n{s}", .{log_str});
+            log.err("Program linking failed - program id: {}", .{self.id});
+
+            if (log_length > 0) {
+                const log_str = info_log[0..@intCast(log_length)];
+                log.err("Program error log:\n{s}", .{log_str});
+            } else {
+                log.err("No program info log available (log_length = 0)", .{});
+            }
+
             return error.ProgramLinkFailed;
         }
     }

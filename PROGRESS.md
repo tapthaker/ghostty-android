@@ -1,7 +1,7 @@
 # Ghostty Android Renderer Progress
 
 **Last Updated:** 2025-11-02  
-**Status:** Pipeline 2 Complete ✅ | Pipeline 3 In Progress ⚠️
+**Status:** Pipeline 2 Complete ✅ | Pipeline 3 Shaders Fixed ✅ | Rendering In Progress ⚠️
 
 ---
 
@@ -121,11 +121,17 @@ pub const CellText = extern struct {
 };
 ```
 
-**Current Issue:** ⚠️
-- Fragment shader failing to compile on device
-- Error: `error.ShaderCompileFailed` (no detailed log)
-- Build-time compilation succeeds (host validation)
-- Likely GLSL ES 3.1 compatibility issue in shader code
+**Fixed Issues:** ✅
+1. **Interface block incompatibility** - Mali-G57 requires individual `in`/`out` variables instead of interface blocks
+2. **Switch statement syntax** - `default` case must come last, use `break` instead of `return`
+3. **SSBO in vertex shader** - Mali-G57 doesn't support SSBOs in vertex shaders (max=0), using global bg color instead
+4. **Logging configuration** - Added custom `std_options.logFn` to output Zig logs to Android logcat
+
+**Current Status:** ⚠️
+- Shaders compile and link successfully
+- Renderer initializes successfully
+- First frame render fails with `error.InvalidOperation` (subsequent frames succeed)
+- Screen shows black (no visible rendering yet)
 
 ---
 
@@ -157,6 +163,22 @@ pub const CellText = extern struct {
    - ❌ Required in ES, not in desktop GL
    - ✅ Auto-inject `precision highp float;` via shader module
 
+7. **Interface blocks in shaders**
+   - ❌ Mali drivers have compatibility issues with interface blocks
+   - ✅ Use individual `in`/`out` variables instead
+
+8. **SSBO in vertex shaders**
+   - ❌ Mali-G57 doesn't support SSBOs in vertex shaders (`MAX_VERTEX_SHADER_STORAGE_BLOCKS = 0`)
+   - ✅ Move SSBO access to fragment shader or use alternative approach
+
+9. **Switch statement syntax**
+   - ❌ `default:` before `case` labels causes issues on some drivers
+   - ✅ Place `default:` at the end, use `break` instead of `return`
+
+10. **Zig logging on Android**
+    - ❌ `std.log.scoped()` doesn't output to logcat by default
+    - ✅ Configure `std_options.logFn` to use `__android_log_print`
+
 ---
 
 ## Testing & Verification
@@ -170,7 +192,8 @@ pub const CellText = extern struct {
 ### Visual Verification
 - ✅ Purple background rendering (Pipeline 1)
 - ✅ Red/green checkerboard pattern (Pipeline 2)
-- ⚠️ Text rendering not yet verified (shader issue)
+- ✅ Cell text shaders compile and link successfully (Pipeline 3)
+- ⚠️ Text rendering shows black screen (needs glyph data)
 
 ### Build System
 - ✅ Zig cross-compilation to Android
@@ -182,8 +205,13 @@ pub const CellText = extern struct {
 
 ## Pending Work 🔲
 
-### Pipeline 3: Cell Text (In Progress)
-- [ ] Debug cell_text.f.glsl compilation failure
+### Pipeline 3: Cell Text (Shaders Complete)
+- [x] Debug cell_text shader compilation failures
+- [x] Fix interface block incompatibility (Mali-G57)
+- [x] Fix SSBO vertex shader limitation (Mali-G57)
+- [x] Fix switch statement syntax issues
+- [x] Shaders compile and link successfully
+- [ ] Populate font atlases with actual glyph data
 - [ ] Verify glyph rendering with test data
 - [ ] Test atlas sampling and coordinate normalization
 - [ ] Verify linear blending and correction
@@ -271,18 +299,20 @@ adb logcat | grep -E "(GhosttyRenderer|Shader)"
 
 ## Known Issues
 
-1. **cell_text.f.glsl shader compilation failure**
-   - Compiles at build time but fails on device
-   - Need device-side shader info log for debugging
-   - Possibly `switch` statement or interface block syntax
+1. **First frame rendering error**
+   - `error.InvalidOperation` on first `onDrawFrame` call
+   - Subsequent frames succeed without error
+   - Does not prevent rendering from working
 
-2. **Missing shader error logs**
-   - `glGetShaderInfoLog` not exposed yet
-   - Need to add detailed error reporting
-
-3. **No font atlas content yet**
+2. **No font atlas content yet**
    - Empty textures (512×512 black)
    - Need FreeType integration for glyph rasterization
+   - Causes black screen (no visible glyphs)
+
+3. **Per-cell background colors disabled**
+   - Mali-G57 doesn't support SSBOs in vertex shaders
+   - Currently using global background color only
+   - Future: Move to fragment shader or use texture-based approach
 
 ---
 

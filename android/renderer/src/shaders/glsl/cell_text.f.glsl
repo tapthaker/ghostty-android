@@ -14,12 +14,12 @@ layout(binding = 2, std140) uniform AtlasDimensions {
     vec2 color_size;      // Width and height of color atlas
 };
 
-in CellTextVertexOut {
-    flat uint atlas;
-    flat vec4 color;
-    flat vec4 bg_color;
-    vec2 tex_coord;  // Pixel coordinates from vertex shader
-} in_data;
+// Input variables (individual variables instead of interface block for ES compatibility)
+// These must match the vertex shader output names exactly
+flat in uint out_atlas;
+flat in vec4 out_color;
+flat in vec4 out_bg_color;
+in vec2 out_tex_coord;  // Pixel coordinates from vertex shader
 
 // Values `atlas` can take.
 const uint ATLAS_GRAYSCALE = 0u;
@@ -32,12 +32,11 @@ void main() {
     bool use_linear_blending = (bools & USE_LINEAR_BLENDING) != 0u;
     bool use_linear_correction = (bools & USE_LINEAR_CORRECTION) != 0u;
 
-    switch (in_data.atlas) {
-        default:
+    switch (out_atlas) {
         case ATLAS_GRAYSCALE:
         {
             // Our input color is always linear.
-            vec4 color = in_data.color;
+            vec4 color = out_color;
 
             // If we're not doing linear blending, then we need to
             // re-apply the gamma encoding to our color manually.
@@ -51,7 +50,7 @@ void main() {
             }
 
             // Normalize pixel coordinates to 0.0-1.0 range for sampler2D
-            vec2 normalized_coord = in_data.tex_coord / grayscale_size;
+            vec2 normalized_coord = out_tex_coord / grayscale_size;
 
             // Fetch our alpha mask for this pixel.
             float a = texture(atlas_grayscale, normalized_coord).r;
@@ -69,7 +68,7 @@ void main() {
                 //
                 // This yields virtually identical results for grayscale blending,
                 // and very similar but non-identical results for color blending.
-                vec4 bg = in_data.bg_color;
+                vec4 bg = out_bg_color;
                 float fg_l = luminance(color.rgb);
                 float bg_l = luminance(bg.rgb);
                 // To avoid numbers going haywire, we don't apply correction
@@ -86,13 +85,13 @@ void main() {
             color *= a;
 
             out_FragColor = color;
-            return;
+            break;
         }
 
         case ATLAS_COLOR:
         {
             // Normalize pixel coordinates to 0.0-1.0 range for sampler2D
-            vec2 normalized_coord = in_data.tex_coord / color_size;
+            vec2 normalized_coord = out_tex_coord / color_size;
 
             // For now, we assume that color glyphs
             // are already premultiplied linear colors.
@@ -101,7 +100,7 @@ void main() {
             // If we are doing linear blending, we can return this right away.
             if (use_linear_blending) {
                 out_FragColor = color;
-                return;
+                break;
             }
 
             // Otherwise we need to unlinearize the color. Since the alpha is
@@ -111,7 +110,11 @@ void main() {
             color.rgb *= vec3(color.a);
 
             out_FragColor = color;
-            return;
+            break;
         }
+
+        default:
+            out_FragColor = vec4(1.0, 0.0, 1.0, 1.0); // Magenta for error
+            break;
     }
 }
