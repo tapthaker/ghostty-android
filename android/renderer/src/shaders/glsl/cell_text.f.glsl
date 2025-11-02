@@ -55,6 +55,13 @@ void main() {
             // Fetch our alpha mask for this pixel.
             float a = texture(atlas_grayscale, normalized_coord).r;
 
+            // DEBUG: Uncomment to visualize that vertices are being rendered
+            // This will show solid rectangles regardless of texture content
+            // a = 1.0; // Force full opacity for debugging
+
+            // DEBUG: Visualize texture coordinates
+            // color.rg = normalized_coord; // Show UV coords as red-green gradient
+
             // Linear blending weight correction corrects the alpha value to
             // produce blending results which match gamma-incorrect blending.
             if (use_linear_correction) {

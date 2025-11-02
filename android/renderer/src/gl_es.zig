@@ -26,11 +26,26 @@ pub fn checkError() Error!void {
     const err = c.glGetError();
     return switch (err) {
         c.GL_NO_ERROR => {},
-        c.GL_INVALID_ENUM => error.InvalidEnum,
-        c.GL_INVALID_VALUE => error.InvalidValue,
-        c.GL_INVALID_OPERATION => error.InvalidOperation,
-        c.GL_OUT_OF_MEMORY => error.OutOfMemory,
-        c.GL_INVALID_FRAMEBUFFER_OPERATION => error.InvalidFramebuffer,
+        c.GL_INVALID_ENUM => blk: {
+            log.err("OpenGL error: GL_INVALID_ENUM", .{});
+            break :blk error.InvalidEnum;
+        },
+        c.GL_INVALID_VALUE => blk: {
+            log.err("OpenGL error: GL_INVALID_VALUE", .{});
+            break :blk error.InvalidValue;
+        },
+        c.GL_INVALID_OPERATION => blk: {
+            log.err("OpenGL error: GL_INVALID_OPERATION", .{});
+            break :blk error.InvalidOperation;
+        },
+        c.GL_OUT_OF_MEMORY => blk: {
+            log.err("OpenGL error: GL_OUT_OF_MEMORY", .{});
+            break :blk error.OutOfMemory;
+        },
+        c.GL_INVALID_FRAMEBUFFER_OPERATION => blk: {
+            log.err("OpenGL error: GL_INVALID_FRAMEBUFFER_OPERATION", .{});
+            break :blk error.InvalidFramebuffer;
+        },
         else => blk: {
             log.err("Unknown OpenGL error: 0x{x}", .{err});
             break :blk error.InvalidOperation;

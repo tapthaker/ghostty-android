@@ -120,12 +120,14 @@ build-android:
 	@echo "$(COLOR_GREEN)✓ Android APK built$(COLOR_RESET)"
 	@echo "APK location: android/app/build/outputs/apk/debug/app-debug.apk"
 
-## android: Build native libraries, Android APK, and install to device (one-stop command)
+## android: Build native libraries, Android APK, install to device, and launch (one-stop command)
 android:
 	@./android/scripts/build-android.sh --install
+	@echo "$(COLOR_YELLOW)Launching Ghostty...$(COLOR_RESET)"
+	@adb shell am start -n com.ghostty.android/.MainActivity
 	@echo ""
 	@echo "$(COLOR_GREEN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(COLOR_RESET)"
-	@echo "$(COLOR_GREEN)✓ Ghostty Android built and installed successfully!$(COLOR_RESET)"
+	@echo "$(COLOR_GREEN)✓ Ghostty Android built, installed, and launched successfully!$(COLOR_RESET)"
 	@echo "$(COLOR_GREEN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(COLOR_RESET)"
 	@echo ""
 	@echo "$(COLOR_BOLD)Native Libraries:$(COLOR_RESET)"

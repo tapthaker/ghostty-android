@@ -1,7 +1,7 @@
 # Ghostty Android Renderer Progress
 
-**Last Updated:** 2025-11-02  
-**Status:** Pipeline 2 Complete ✅ | Pipeline 3 Shaders Fixed ✅ | Rendering In Progress ⚠️
+**Last Updated:** 2025-11-02
+**Status:** Pipeline 1-3 Complete ✅ | Test Glyphs Rendering ✅
 
 ---
 
@@ -88,10 +88,10 @@ The renderer uses a multi-pass rendering pipeline architecture:
 - Removed `readonly` qualifier (not in ES 3.1 spec)
 - Changed UBO binding from 1→0 to avoid SSBO conflict
 
-### Pipeline 3: Font Atlas Infrastructure ✅
+### Pipeline 3: Cell Text Rendering ✅
 
-**Status:** Infrastructure complete, shader debugging in progress  
-**Commits:** `e42a364`, `19ca269`
+**Status:** Complete - Test glyphs rendering successfully
+**Commits:** `e42a364`, `19ca269`, `9d7548a`
 
 **Completed:**
 - R8 grayscale font atlas (512×512) for regular text
@@ -126,12 +126,14 @@ pub const CellText = extern struct {
 2. **Switch statement syntax** - `default` case must come last, use `break` instead of `return`
 3. **SSBO in vertex shader** - Mali-G57 doesn't support SSBOs in vertex shaders (max=0), using global bg color instead
 4. **Logging configuration** - Added custom `std_options.logFn` to output Zig logs to Android logcat
+5. **VAO/Buffer binding order** - Fixed critical issue where VAO was configured without buffer bound, preventing vertex attributes from accessing instance data
 
-**Current Status:** ⚠️
-- Shaders compile and link successfully
-- Renderer initializes successfully
-- First frame render fails with `error.InvalidOperation` (subsequent frames succeed)
-- Screen shows black (no visible rendering yet)
+**Test Pattern Results:** ✅
+- White square (solid 255 fill) in top-left
+- Gradient pattern (0-255 ramp) in top-right
+- Checkerboard pattern in bottom-left
+- Cross pattern in bottom-right
+- All 4 test glyphs render correctly with distinct patterns
 
 ---
 
@@ -193,7 +195,7 @@ pub const CellText = extern struct {
 - ✅ Purple background rendering (Pipeline 1)
 - ✅ Red/green checkerboard pattern (Pipeline 2)
 - ✅ Cell text shaders compile and link successfully (Pipeline 3)
-- ⚠️ Text rendering shows black screen (needs glyph data)
+- ✅ Test glyphs render with distinct patterns (white square, gradient, checkerboard, cross)
 
 ### Build System
 - ✅ Zig cross-compilation to Android
@@ -205,16 +207,17 @@ pub const CellText = extern struct {
 
 ## Pending Work 🔲
 
-### Pipeline 3: Cell Text (Shaders Complete)
+### Pipeline 3: Cell Text (Complete ✅)
 - [x] Debug cell_text shader compilation failures
 - [x] Fix interface block incompatibility (Mali-G57)
 - [x] Fix SSBO vertex shader limitation (Mali-G57)
 - [x] Fix switch statement syntax issues
 - [x] Shaders compile and link successfully
-- [ ] Populate font atlases with actual glyph data
-- [ ] Verify glyph rendering with test data
-- [ ] Test atlas sampling and coordinate normalization
-- [ ] Verify linear blending and correction
+- [x] Fix VAO/buffer binding order issue
+- [x] Verify glyph rendering with test patterns
+- [x] Test atlas sampling and coordinate normalization
+- [ ] Populate font atlases with actual glyph data (FreeType integration)
+- [ ] Verify linear blending and correction with real glyphs
 - [ ] Test cursor color override
 - [ ] Test minimum contrast enforcement
 
@@ -303,16 +306,17 @@ adb logcat | grep -E "(GhosttyRenderer|Shader)"
    - `error.InvalidOperation` on first `onDrawFrame` call
    - Subsequent frames succeed without error
    - Does not prevent rendering from working
+   - Likely related to uniform initialization timing
 
-2. **No font atlas content yet**
-   - Empty textures (512×512 black)
-   - Need FreeType integration for glyph rasterization
-   - Causes black screen (no visible glyphs)
+2. **No real font glyph data yet**
+   - Currently using test patterns (white square, gradient, checkerboard, cross)
+   - Need FreeType integration for actual glyph rasterization
+   - Test patterns confirm rendering pipeline is working correctly
 
-3. **Per-cell background colors disabled**
+3. **Per-cell background colors disabled in vertex shader**
    - Mali-G57 doesn't support SSBOs in vertex shaders
-   - Currently using global background color only
-   - Future: Move to fragment shader or use texture-based approach
+   - Currently using global background color only in vertex shader
+   - Fragment shader still has access to SSBO for per-cell colors
 
 ---
 

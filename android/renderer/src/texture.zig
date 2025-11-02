@@ -69,6 +69,13 @@ pub fn init(
         @intCast(@intFromEnum(opts.mag_filter)),
     );
 
+    // Set pixel unpack alignment for single-channel textures
+    // R8 format needs alignment of 1 byte
+    if (opts.format == .red) {
+        const c = @import("gl_es.zig").c;
+        c.glPixelStorei(c.GL_UNPACK_ALIGNMENT, 1);
+    }
+
     // Upload texture data
     gl.Texture.image2D(
         .texture_2d,
@@ -79,6 +86,13 @@ pub fn init(
         opts.format,
         if (data) |d| @ptrCast(d.ptr) else null,
     );
+
+    // Check for errors after texture allocation
+    gl.checkError() catch |err| {
+        const log = std.log.scoped(.texture);
+        log.err("Failed to allocate texture storage: {}", .{err});
+        return error.OpenGLFailed;
+    };
 
     return .{
         .texture = tex,
@@ -103,8 +117,17 @@ pub fn replaceRegion(
     height: usize,
     data: []const u8,
 ) Error!void {
+    const log = std.log.scoped(.texture);
+    log.debug("replaceRegion: x={} y={} width={} height={} data_len={}", .{ x, y, width, height, data.len });
+
     self.texture.bind(.texture_2d);
     defer gl.Texture.unbind(.texture_2d);
+
+    // Set pixel unpack alignment for single-channel textures
+    if (self.format == .red) {
+        const c = gl.c;
+        c.glPixelStorei(c.GL_UNPACK_ALIGNMENT, 1);
+    }
 
     gl.Texture.subImage2D(
         .texture_2d,
@@ -117,11 +140,24 @@ pub fn replaceRegion(
         data.ptr,
     );
 
-    gl.checkError() catch return error.OpenGLFailed;
+    gl.checkError() catch {
+        log.err("replaceRegion failed after subImage2D", .{});
+        return error.OpenGLFailed;
+    };
+
+    log.debug("replaceRegion: success", .{});
 }
 
 /// Bind this texture to a specific texture unit
 pub fn bindToUnit(self: Self, unit: u32) void {
     gl.Texture.active(unit);
+
+    // For R8 textures, ensure proper pixel alignment
+    if (self.format == .red) {
+        const c = @import("gl_es.zig").c;
+        c.glPixelStorei(c.GL_UNPACK_ALIGNMENT, 1);
+        c.glPixelStorei(c.GL_PACK_ALIGNMENT, 1);
+    }
+
     self.texture.bind(.texture_2d);
 }

@@ -51,6 +51,9 @@ glyphs_buffer: Buffer(shaders.CellText),
 /// Cell text rendering pipeline
 cell_text_pipeline: Pipeline,
 
+/// Number of glyphs to render (for testing)
+num_test_glyphs: u32 = 0,
+
 /// Initialize the renderer
 pub fn init(allocator: std.mem.Allocator) !Self {
     log.info("Initializing renderer", .{});
@@ -133,21 +136,71 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     const atlas_size: usize = 512;
 
     // Grayscale atlas (R8 format for regular text)
+    // Allocate with zero-filled data, but embed test glyph directly
+    const grayscale_data = try allocator.alloc(u8, atlas_size * atlas_size);
+    defer allocator.free(grayscale_data);
+    @memset(grayscale_data, 0);
+
+    // Embed multiple test patterns for debugging
+    const glyph_size: usize = 16;
+
+    // Pattern 1: White square at (0, 0)
+    for (0..glyph_size) |y| {
+        for (0..glyph_size) |x| {
+            const idx = y * atlas_size + x;
+            grayscale_data[idx] = 255; // White
+        }
+    }
+
+    // Pattern 2: Gradient at (32, 0) - horizontal gradient from dark to light
+    for (0..glyph_size) |y| {
+        for (0..glyph_size) |x| {
+            const idx = y * atlas_size + (x + 32);
+            grayscale_data[idx] = @intCast(x * 16); // Gradient 0-255
+        }
+    }
+
+    // Pattern 3: Checkerboard at (64, 0)
+    for (0..glyph_size) |y| {
+        for (0..glyph_size) |x| {
+            const idx = y * atlas_size + (x + 64);
+            const checker = ((x / 4) + (y / 4)) % 2;
+            grayscale_data[idx] = if (checker == 0) 255 else 128;
+        }
+    }
+
+    // Pattern 4: Cross pattern at (96, 0)
+    for (0..glyph_size) |y| {
+        for (0..glyph_size) |x| {
+            const idx = y * atlas_size + (x + 96);
+            if (x == 8 or y == 8) {
+                grayscale_data[idx] = 255; // White cross
+            } else {
+                grayscale_data[idx] = 64; // Dark background
+            }
+        }
+    }
+
     const atlas_grayscale = try Texture.init(.{
         .format = .red,
         .internal_format = .r8,
         .min_filter = .nearest,
         .mag_filter = .nearest,
-    }, atlas_size, atlas_size, null);
+    }, atlas_size, atlas_size, grayscale_data);
     errdefer atlas_grayscale.deinit();
 
     // Color atlas (RGBA8 format for color emoji)
+    // Allocate with zero-filled data to ensure proper storage allocation on Mali
+    const color_data = try allocator.alloc(u8, atlas_size * atlas_size * 4); // RGBA = 4 bytes per pixel
+    defer allocator.free(color_data);
+    @memset(color_data, 0);
+
     const atlas_color = try Texture.init(.{
         .format = .rgba,
         .internal_format = .rgba8,
         .min_filter = .nearest,
         .mag_filter = .nearest,
-    }, atlas_size, atlas_size, null);
+    }, atlas_size, atlas_size, color_data);
     errdefer atlas_color.deinit();
 
     // Create atlas dimensions UBO
@@ -170,7 +223,19 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     const cell_text_vertex_src = shader_module.loadShaderCode("shaders/glsl/cell_text.v.glsl");
     const cell_text_fragment_src = shader_module.loadShaderCode("shaders/glsl/cell_text.f.glsl");
 
-    // Create cell text pipeline with auto-configured vertex attributes for instanced rendering
+    // Create glyphs instance buffer FIRST (before pipeline)
+    // For testing: allocate space for 1920 glyphs (80x24 full screen)
+    const max_glyphs = grid_cols * grid_rows;
+    var glyphs_buffer = try Buffer(shaders.CellText).init(.{
+        .target = .array,
+        .usage = .dynamic_draw,
+    }, max_glyphs);
+    errdefer glyphs_buffer.deinit();
+
+    // Bind the buffer so it's active when VAO attributes are configured
+    glyphs_buffer.buffer.bind(glyphs_buffer.opts.target);
+
+    // NOW create the pipeline - the VAO will be configured with the buffer bound
     const cell_text_pipeline = try Pipeline.init(shaders.CellText, .{
         .vertex_src = cell_text_vertex_src,
         .fragment_src = cell_text_fragment_src,
@@ -182,28 +247,80 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     // Set sampler uniforms (OpenGL ES 3.1 doesn't support layout(binding) for samplers)
     cell_text_pipeline.program.use();
     const atlas_grayscale_loc = cell_text_pipeline.program.getUniformLocation("atlas_grayscale");
+    log.info("atlas_grayscale uniform location: {}", .{atlas_grayscale_loc});
     if (atlas_grayscale_loc >= 0) {
         gl.uniform1i(atlas_grayscale_loc, 0); // Texture unit 0
-    }
-    const atlas_color_loc = cell_text_pipeline.program.getUniformLocation("atlas_color");
-    if (atlas_color_loc >= 0) {
-        gl.uniform1i(atlas_color_loc, 1); // Texture unit 1
+    } else {
+        log.warn("atlas_grayscale uniform not found!", .{});
     }
 
-    // Create glyphs instance buffer
-    // For testing: allocate space for 1920 glyphs (80x24 full screen)
-    const max_glyphs = grid_cols * grid_rows;
-    var glyphs_buffer = try Buffer(shaders.CellText).init(.{
-        .target = .array,
-        .usage = .dynamic_draw,
-    }, max_glyphs);
-    errdefer glyphs_buffer.deinit();
+    const atlas_color_loc = cell_text_pipeline.program.getUniformLocation("atlas_color");
+    log.info("atlas_color uniform location: {}", .{atlas_color_loc});
+    if (atlas_color_loc >= 0) {
+        gl.uniform1i(atlas_color_loc, 1); // Texture unit 1
+    } else {
+        log.warn("atlas_color uniform not found!", .{});
+    }
+
+    // Note: We leave the program bound after setting uniforms
+    // The uniforms are part of the program state and will persist
+
+    // Test glyphs using different patterns from the atlas
+    // Each glyph references a different test pattern for debugging
+    const test_glyphs = [_]shaders.CellText{
+        .{
+            .glyph_pos = .{ 0, 0 }, // Pattern 1: White square
+            .glyph_size = .{ glyph_size, glyph_size },
+            .bearings = .{ 0, @intCast(glyph_size) },
+            .grid_pos = .{ 0, 5 }, // Terminal position (column 0, row 5)
+            .color = .{ 255, 255, 255, 255 }, // White
+            .atlas = .grayscale,
+            .bools = .{},
+        },
+        .{
+            .glyph_pos = .{ 32, 0 }, // Pattern 2: Gradient
+            .glyph_size = .{ glyph_size, glyph_size },
+            .bearings = .{ 0, @intCast(glyph_size) },
+            .grid_pos = .{ 1, 5 }, // Column 1, row 5
+            .color = .{ 255, 255, 255, 255 }, // White
+            .atlas = .grayscale,
+            .bools = .{},
+        },
+        .{
+            .glyph_pos = .{ 64, 0 }, // Pattern 3: Checkerboard
+            .glyph_size = .{ glyph_size, glyph_size },
+            .bearings = .{ 0, @intCast(glyph_size) },
+            .grid_pos = .{ 2, 5 }, // Column 2, row 5
+            .color = .{ 255, 0, 0, 255 }, // Red tint
+            .atlas = .grayscale,
+            .bools = .{},
+        },
+        .{
+            .glyph_pos = .{ 96, 0 }, // Pattern 4: Cross
+            .glyph_size = .{ glyph_size, glyph_size },
+            .bearings = .{ 0, @intCast(glyph_size) },
+            .grid_pos = .{ 3, 5 }, // Column 3, row 5
+            .color = .{ 0, 255, 0, 255 }, // Green tint
+            .atlas = .grayscale,
+            .bools = .{},
+        },
+    };
+
+    // Upload test glyphs to GPU
+    try glyphs_buffer.sync(&test_glyphs);
+    const num_test_glyphs: u32 = test_glyphs.len;
+    log.info("Uploaded {} test glyphs to GPU", .{num_test_glyphs});
+    log.info("Test glyph 0: grid_pos=({},{}), glyph_size={}x{}, bearings=({},{})", .{
+        test_glyphs[0].grid_pos[0], test_glyphs[0].grid_pos[1],
+        test_glyphs[0].glyph_size[0], test_glyphs[0].glyph_size[1],
+        test_glyphs[0].bearings[0], test_glyphs[0].bearings[1],
+    });
 
     // Initialize default uniforms
     const uniforms = shaders.Uniforms{
         .projection_matrix = shaders.createOrthoMatrix(800.0, 600.0), // Will be updated on resize
         .screen_size = .{ 800.0, 600.0 },
-        .cell_size = .{ 12.0, 24.0 }, // Default cell size
+        .cell_size = .{ 20.0, 30.0 }, // Increased cell size for testing
         .grid_size_packed_2u16 = shaders.Uniforms.pack2u16(80, 24), // 80x24 default
         .grid_padding = .{ 0.0, 0.0, 0.0, 0.0 },
         .padding_extend = .{},
@@ -233,6 +350,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .atlas_dims_buffer = atlas_dims_buffer,
         .glyphs_buffer = glyphs_buffer,
         .cell_text_pipeline = cell_text_pipeline,
+        .num_test_glyphs = num_test_glyphs,
     };
 }
 
@@ -268,6 +386,8 @@ pub fn resize(self: *Self, width: u32, height: u32) !void {
         @floatFromInt(height),
     );
 
+    log.info("Cell size: {d}x{d}", .{ self.uniforms.cell_size[0], self.uniforms.cell_size[1] });
+
     // Upload updated uniforms to GPU
     try self.syncUniforms();
 }
@@ -290,26 +410,50 @@ pub fn render(self: *Self) !void {
     self.bg_color_pipeline.use();
     gl.drawArrays(gl.GL_TRIANGLES, 0, 3); // Draw 3 vertices for full-screen triangle
 
-    // Render cell backgrounds (blended over bg_color)
-    self.cell_bg_pipeline.use();
-    gl.drawArrays(gl.GL_TRIANGLES, 0, 3); // Draw 3 vertices for full-screen triangle
+    // TEMPORARILY DISABLED: Render cell backgrounds (blended over bg_color)
+    // self.cell_bg_pipeline.use();
+    // gl.drawArrays(gl.GL_TRIANGLES, 0, 3); // Draw 3 vertices for full-screen triangle
+
+    // Check for errors after cell backgrounds (non-fatal for now)
+    // gl.checkError() catch |err| {
+    //     log.warn("GL error after cell_bg rendering (non-fatal): {}", .{err});
+    // };
 
     // Render cell text (blended over cell backgrounds)
-    // For now, we'll render 0 glyphs (will add test glyphs later)
+    // First activate the pipeline (which binds the VAO)
     self.cell_text_pipeline.use();
+    gl.checkError() catch |err| {
+        log.err("GL error after pipeline.use(): {}", .{err});
+    };
+
+    // Then bind the glyphs buffer to the active VAO
+    log.debug("Binding glyphs buffer", .{});
+    self.glyphs_buffer.buffer.bind(self.glyphs_buffer.opts.target);
+    gl.checkError() catch |err| {
+        log.err("GL error after buffer bind: {}", .{err});
+    };
 
     // Bind font atlas textures to their respective texture units
+    log.debug("Binding atlas textures", .{});
     self.atlas_grayscale.bindToUnit(0); // Texture unit 0
+    gl.checkError() catch |err| {
+        log.err("GL error after grayscale texture bind: {}", .{err});
+    };
+
     self.atlas_color.bindToUnit(1);     // Texture unit 1
+    gl.checkError() catch |err| {
+        log.err("GL error after color texture bind: {}", .{err});
+    };
 
     // Draw glyphs using instanced rendering (4 vertices per glyph instance)
-    const num_glyphs: u32 = 0; // TODO: Will be set to actual glyph count
-    if (num_glyphs > 0) {
-        gl.drawArraysInstanced(gl.GL_TRIANGLE_STRIP, 0, 4, @intCast(num_glyphs));
+    if (self.num_test_glyphs > 0) {
+        gl.drawArraysInstanced(gl.GL_TRIANGLE_STRIP, 0, 4, @intCast(self.num_test_glyphs));
+        gl.checkError() catch |err| {
+            log.err("GL error after drawArraysInstanced: {}", .{err});
+        };
+    } else {
+        log.warn("num_test_glyphs is 0, skipping text rendering", .{});
     }
-
-    // Check for errors
-    try gl.checkError();
 }
 
 /// Update background color

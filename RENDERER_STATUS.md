@@ -6,6 +6,8 @@ This document tracks the implementation of the Zig-based OpenGL ES 3.1 renderer 
 
 **Architecture Decision**: Using Zig for renderer implementation to achieve 70-80% code reuse from the desktop OpenGL 4.3 renderer.
 
+**Current Status**: Phase 2 in Progress - Multiple pipelines working, test glyphs rendering ✅
+
 ---
 
 ## Phase 1: Foundation & Proof of Concept ✅ COMPLETE
@@ -100,54 +102,112 @@ target_link_libraries(ghostty_bridge
 
 ---
 
+## Phase 2: Core Renderer Implementation ⚡ IN PROGRESS
+
+### Completed Tasks
+
+#### 1. Shader System Implementation ✅
+**Files**: `android/renderer/src/shader.zig`
+- GLSL ES 310 shader compilation with error reporting
+- Include preprocessing for shader composition
+- Automatic precision qualifier injection
+- Build-time shader embedding
+
+#### 2. Core Rendering Components ✅
+**Files**: Multiple modules in `android/renderer/src/`
+- **buffer.zig**: Generic typed buffers (VBO, UBO, SSBO)
+- **texture.zig**: R8 and RGBA8 texture management for font atlases
+- **pipeline.zig**: Render pipeline abstraction with VAO management
+- **gl_es.zig**: OpenGL ES 3.1 wrapper with error checking
+
+#### 3. Multiple Rendering Pipelines ✅
+
+**Pipeline 1: Background Color** ✅
+- Full-screen triangle rendering (no vertex buffer)
+- Solid purple background confirmed working
+
+**Pipeline 2: Cell Backgrounds** ✅
+- SSBO-based per-cell background colors
+- Red/green checkerboard pattern rendering successfully
+- 80×24 grid (1920 cells) with packed RGBA8 colors
+
+**Pipeline 3: Cell Text** ✅
+- Instanced glyph rendering with dual font atlases
+- R8 grayscale atlas (512×512) for regular text
+- RGBA8 color atlas (512×512) for color emoji
+- Test patterns rendering successfully (white square, gradient, checkerboard, cross)
+- Fixed critical VAO/buffer binding order issue
+
+#### 4. OpenGL ES 3.1 Compatibility Fixes ✅
+- Removed SSBO `readonly` qualifier (not in ES 3.1)
+- Programmatic sampler uniform binding
+- Individual `in`/`out` variables instead of interface blocks (Mali-G57 compatibility)
+- Proper switch statement syntax for Mali drivers
+- Pixel alignment for R8 textures
+
+### Current Achievements
+- Three rendering pipelines working correctly
+- Test glyphs rendering with distinct patterns
+- Proper blending between pipelines
+- Mali-G57 GPU compatibility confirmed
+- Shader compilation and linking successful
+
+### Remaining Work for Phase 2
+- [ ] FreeType integration for actual glyph rasterization
+- [ ] Connection to libghostty-vt parser
+- [ ] Real terminal cell data rendering
+- [ ] Pipeline 4: Terminal images
+- [ ] Pipeline 5: Background image
+
+---
+
 ## What Works Now
 
 1. ✅ **Build System**: Can compile Zig renderer for all Android ABIs (arm64-v8a, armeabi-v7a, x86_64)
 2. ✅ **JNI Integration**: Native code loads and initializes successfully
 3. ✅ **OpenGL ES Context**: GL context creation and management working
-4. ✅ **Proof of Concept**: Renders solid color (purple) to screen
-5. ✅ **Lifecycle**: Proper pause/resume/destroy handling
-6. ✅ **Version Detection**: Checks for OpenGL ES 3.1 support at runtime
+4. ✅ **Multiple Render Pipelines**: Background, cell backgrounds, and text rendering working
+5. ✅ **Shader System**: GLSL ES 3.1 shaders compiling and linking successfully
+6. ✅ **Test Glyphs**: Rendering with distinct patterns (white square, gradient, checkerboard, cross)
+7. ✅ **Buffer Management**: VBO, UBO, SSBO all working correctly
+8. ✅ **Texture System**: Dual font atlases (R8 grayscale, RGBA8 color) initialized
+9. ✅ **Lifecycle**: Proper pause/resume/destroy handling
+10. ✅ **Version Detection**: Checks for OpenGL ES 3.1 support at runtime
 
 ---
 
-## Next Steps (Phase 2)
+## Next Steps (Phase 2 Completion)
 
-### Immediate: Complete Proof of Concept
-**Goal**: Render a colored rectangle (not just clear screen)
+### Immediate: FreeType Integration
+**Goal**: Render actual terminal text (not just test patterns)
 
 **Tasks**:
-1. Create simple vertex shader (GLSL 310 es)
-2. Create simple fragment shader (GLSL 310 es)
-3. Compile shaders in native code
-4. Create vertex buffer with rectangle coordinates
-5. Render rectangle in `nativeOnDrawFrame()`
+1. Integrate FreeType library for glyph rasterization
+2. Populate font atlases with actual glyph bitmaps
+3. Connect to terminal cell data from libghostty-vt
+4. Test with real terminal text content
 
-**Estimated**: 1-2 days
+**Estimated**: 3-4 days
 
-### Shader Conversion (Required for all pipelines)
+### Terminal Integration
 **Tasks**:
-1. Create shader conversion script
-2. Convert `common.glsl` to ES 3.1
-3. Convert all 5 pipeline shaders (bg_color, cell_bg, cell_text, image, bg_image)
-
-**Key Changes**:
-- `#version 430 core` → `#version 310 es`
-- Add `precision highp float;` and `precision highp int;`
-- Replace `sampler2DRect` → `sampler2D` + normalize coordinates
-- Test compilation on device
-
-**Estimated**: 2-3 days
-
-### Core Renderer Porting
-**Tasks**:
-1. Port `buffer.zig` for UBO/SSBO management
-2. Port `Texture.zig` for font atlas
-3. Port `Pipeline.zig` for render pipeline setup
-4. Port `shaders.zig` for shader compilation
-5. Adapt `OpenGL.zig` for ES 3.1 mode
+1. Bridge TerminalSession to renderer
+2. Expose grid data (text, colors, attributes)
+3. Real-time cell updates
+4. Cursor position synchronization
+5. Selection highlighting
+6. Scrollback rendering
 
 **Estimated**: 1 week
+
+### Remaining Pipelines
+**Tasks**:
+1. **Pipeline 4**: Terminal images (Kitty protocol support)
+2. **Pipeline 5**: Background image rendering
+3. Image texture management
+4. Compositing and blending
+
+**Estimated**: 3-4 days
 
 ---
 
@@ -170,14 +230,25 @@ cd android && ./gradlew installDebug
 ### Expected Behavior
 
 1. App launches normally
-2. Screen displays solid purple color (0.4, 0.2, 0.6, 1.0)
+2. Screen displays:
+   - Purple background (Pipeline 1)
+   - Red/green checkerboard pattern overlay (Pipeline 2)
+   - Four test glyphs with distinct patterns in corners (Pipeline 3):
+     - Top-left: White square
+     - Top-right: Gradient pattern
+     - Bottom-left: Checkerboard
+     - Bottom-right: Cross pattern
 3. Logcat shows:
    ```
    I/GhosttyRenderer: Successfully loaded libghostty_renderer.so
-   I/GhosttyRenderer: OpenGL Version: OpenGL ES 3.1 ...
-   I/GhosttyRenderer: OpenGL Renderer: <GPU name>
-   I/GhosttyRenderer: OpenGL ES Version: 3.1
+   I/GhosttyRenderer: OpenGL Version: OpenGL ES 3.2 ...
+   I/GhosttyRenderer: OpenGL Renderer: Mali-G57 (or your GPU)
    I/GhosttyRenderer: Renderer initialized successfully
+   I/GhosttyRenderer: Pipeline 1: Background color initialized
+   I/GhosttyRenderer: Pipeline 2: Cell backgrounds initialized
+   I/GhosttyRenderer: Pipeline 3: Cell text initialized
+   I/GhosttyRenderer: Font atlases created (512x512 R8, 512x512 RGBA8)
+   I/GhosttyRenderer: Rendering 4 test glyphs
    ```
 
 ### View Logs
@@ -268,15 +339,13 @@ make logs
 
 ---
 
-## Known Limitations (Phase 1)
+## Known Limitations (Current)
 
-1. **No Actual Terminal Rendering**: Currently just clears screen with solid color
-2. **No Shaders**: Shader pipeline not yet implemented
-3. **No Text Rendering**: Font atlas and glyph rendering pending
-4. **No Terminal Integration**: libghostty-vt VT parser not connected yet
-5. **Fixed Terminal Size**: Hardcoded to 80x24
-
-These are all expected for Phase 1 (Proof of Concept).
+1. **No Actual Font Data**: Using test patterns instead of real glyphs (FreeType integration pending)
+2. **No Terminal Integration**: libghostty-vt VT parser not connected yet
+3. **Fixed Terminal Size**: Hardcoded to 80x24
+4. **First Frame Error**: GL_INVALID_OPERATION on first render (non-fatal)
+5. **Missing Pipelines**: Terminal images and background image not yet implemented
 
 ---
 
@@ -299,8 +368,10 @@ These are all expected for Phase 1 (Proof of Concept).
 
 - **Phase 1 Start**: 2025-11-02
 - **Phase 1 Complete**: 2025-11-02 (same day!)
-- **Next Milestone**: Render actual rectangle with shaders (1-2 days)
-- **Phase 2 Target**: Core renderer working with text (2-3 weeks)
+- **Phase 2 Start**: 2025-11-02
+- **Phase 2 Progress**: 2025-11-02 - Three pipelines working, test glyphs rendering
+- **Next Milestone**: FreeType integration for actual font rendering (3-4 days)
+- **Phase 2 Target**: Full terminal rendering with real text (1-2 weeks)
 
 ---
 
@@ -318,4 +389,4 @@ These are all expected for Phase 1 (Proof of Concept).
 
 ---
 
-Last Updated: 2025-11-02
+Last Updated: 2025-11-02 (Phase 2 Progress - Glyph Rendering Working)

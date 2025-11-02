@@ -70,6 +70,10 @@ pub fn init(
     program.attachShader(fragment_shader);
     try program.link();
 
+    // Log successful linking
+    const log = std.log.scoped(.pipeline);
+    log.info("Shader program {} linked successfully", .{program.id});
+
     // Create VAO
     const vao = try gl.VertexArray.create();
     errdefer vao.delete();
@@ -189,8 +193,27 @@ fn autoConfigureAttributes(
 /// Use this pipeline for rendering.
 /// Binds the program and VAO, and configures blending state.
 pub fn use(self: Self) void {
+    // Check for any pending errors before we start
+    _ = gl.checkError() catch |err| {
+        const log = std.log.scoped(.pipeline);
+        log.err("GL error BEFORE pipeline.use(): {}", .{err});
+    };
+
     self.program.use();
+
+    // Check if program.use() caused an error
+    _ = gl.checkError() catch |err| {
+        const log = std.log.scoped(.pipeline);
+        log.err("GL error after program.use() (program id: {}): {}", .{ self.program.id, err });
+    };
+
     self.vao.bind();
+
+    // Check if vao.bind() caused an error
+    _ = gl.checkError() catch |err| {
+        const log = std.log.scoped(.pipeline);
+        log.err("GL error after vao.bind(): {}", .{err});
+    };
 
     if (self.blending_enabled) {
         gl.enable(gl.GL_BLEND);

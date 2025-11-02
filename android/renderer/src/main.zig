@@ -81,6 +81,8 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const RendererState = struct {
     renderer: ?Renderer = null,
     initialized: bool = false,
+    pending_width: u32 = 0,
+    pending_height: u32 = 0,
 };
 
 var renderer_state: RendererState = .{};
@@ -152,6 +154,18 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceCreat
     };
     renderer_state.initialized = true;
     log.info("Renderer initialized successfully", .{});
+
+    // Apply pending dimensions if onSurfaceChanged was called during initialization
+    if (renderer_state.pending_width > 0 and renderer_state.pending_height > 0) {
+        log.info("Applying pending dimensions: {d}x{d}", .{ renderer_state.pending_width, renderer_state.pending_height });
+        if (renderer_state.renderer) |*r| {
+            r.resize(renderer_state.pending_width, renderer_state.pending_height) catch |err| {
+                log.err("Failed to apply pending resize: {}", .{err});
+            };
+        }
+        renderer_state.pending_width = 0;
+        renderer_state.pending_height = 0;
+    }
 }
 
 /// Called when OpenGL surface size changes
@@ -169,6 +183,14 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceChang
 
     // Set OpenGL viewport
     c.glViewport(0, 0, width, height);
+
+    // Store dimensions for later if renderer not yet initialized
+    if (!renderer_state.initialized) {
+        renderer_state.pending_width = @intCast(width);
+        renderer_state.pending_height = @intCast(height);
+        log.warn("Renderer not yet initialized, storing dimensions for later", .{});
+        return;
+    }
 
     // Update renderer with new dimensions
     if (renderer_state.renderer) |*renderer| {
