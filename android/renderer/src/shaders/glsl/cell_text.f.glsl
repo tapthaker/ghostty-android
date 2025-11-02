@@ -2,8 +2,10 @@
 
 // OpenGL ES uses sampler2D instead of sampler2DRect
 // Texture coordinates must be normalized (0.0 to 1.0)
-layout(binding = 0) uniform sampler2D atlas_grayscale;
-layout(binding = 1) uniform sampler2D atlas_color;
+// Note: OpenGL ES 3.1 doesn't support layout(binding) for samplers
+// These must be bound programmatically using glUniform1i
+uniform sampler2D atlas_grayscale;
+uniform sampler2D atlas_color;
 
 // Texture dimensions for coordinate normalization
 // These will be set as uniforms

@@ -145,6 +145,11 @@ pub const Program = struct {
     }
 };
 
+/// Set a uniform int value (e.g., for texture unit bindings)
+pub fn uniform1i(location: c.GLint, value: c.GLint) void {
+    c.glUniform1i(location, value);
+}
+
 // ============================================================================
 // Buffer Management
 // ============================================================================

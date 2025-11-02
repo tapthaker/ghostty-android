@@ -166,18 +166,29 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     // Bind atlas dimensions to binding point 2
     atlas_dims_buffer.bindBase(2);
 
-    // TODO: Temporarily disabled to debug shader compilation issue
     // Load and compile cell_text shaders
-    // const cell_text_vertex_src = shader_module.loadShaderCode("shaders/glsl/cell_text.v.glsl");
-    // const cell_text_fragment_src = shader_module.loadShaderCode("shaders/glsl/cell_text.f.glsl");
+    const cell_text_vertex_src = shader_module.loadShaderCode("shaders/glsl/cell_text.v.glsl");
+    const cell_text_fragment_src = shader_module.loadShaderCode("shaders/glsl/cell_text.f.glsl");
 
     // Create cell text pipeline with auto-configured vertex attributes for instanced rendering
-    const cell_text_pipeline = try Pipeline.init(null, .{
-        .vertex_src = shader_module.loadShaderCode("shaders/glsl/full_screen.v.glsl"),
-        .fragment_src = shader_module.loadShaderCode("shaders/glsl/bg_color.f.glsl"),
-        .blending_enabled = false, // Dummy pipeline, won't be used
+    const cell_text_pipeline = try Pipeline.init(shaders.CellText, .{
+        .vertex_src = cell_text_vertex_src,
+        .fragment_src = cell_text_fragment_src,
+        .blending_enabled = true, // Blend text over background
+        .step_fn = .per_instance, // Each glyph instance gets its own attributes
     });
     errdefer cell_text_pipeline.deinit();
+
+    // Set sampler uniforms (OpenGL ES 3.1 doesn't support layout(binding) for samplers)
+    cell_text_pipeline.program.use();
+    const atlas_grayscale_loc = cell_text_pipeline.program.getUniformLocation("atlas_grayscale");
+    if (atlas_grayscale_loc >= 0) {
+        gl.uniform1i(atlas_grayscale_loc, 0); // Texture unit 0
+    }
+    const atlas_color_loc = cell_text_pipeline.program.getUniformLocation("atlas_color");
+    if (atlas_color_loc >= 0) {
+        gl.uniform1i(atlas_color_loc, 1); // Texture unit 1
+    }
 
     // Create glyphs instance buffer
     // For testing: allocate space for 1920 glyphs (80x24 full screen)
@@ -283,20 +294,19 @@ pub fn render(self: *Self) !void {
     self.cell_bg_pipeline.use();
     gl.drawArrays(gl.GL_TRIANGLES, 0, 3); // Draw 3 vertices for full-screen triangle
 
-    // TODO: Text rendering temporarily disabled for debugging
     // Render cell text (blended over cell backgrounds)
     // For now, we'll render 0 glyphs (will add test glyphs later)
-    // self.cell_text_pipeline.use();
+    self.cell_text_pipeline.use();
 
     // Bind font atlas textures to their respective texture units
-    // self.atlas_grayscale.bindToUnit(0); // Matches binding 0 in fragment shader
-    // self.atlas_color.bindToUnit(1);     // Matches binding 1 in fragment shader
+    self.atlas_grayscale.bindToUnit(0); // Texture unit 0
+    self.atlas_color.bindToUnit(1);     // Texture unit 1
 
     // Draw glyphs using instanced rendering (4 vertices per glyph instance)
-    // const num_glyphs: u32 = 0; // TODO: Will be set to actual glyph count
-    // if (num_glyphs > 0) {
-    //     gl.drawArraysInstanced(gl.GL_TRIANGLE_STRIP, 0, 4, @intCast(num_glyphs));
-    // }
+    const num_glyphs: u32 = 0; // TODO: Will be set to actual glyph count
+    if (num_glyphs > 0) {
+        gl.drawArraysInstanced(gl.GL_TRIANGLE_STRIP, 0, 4, @intCast(num_glyphs));
+    }
 
     // Check for errors
     try gl.checkError();
