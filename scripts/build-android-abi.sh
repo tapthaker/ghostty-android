@@ -81,3 +81,52 @@ else
     echo "Error: libghostty-vt.so not found"
     exit 1
 fi
+
+# Go back to root directory
+cd ..
+
+# Build the OpenGL ES renderer
+echo ""
+echo "Building ghostty_renderer for Android"
+echo "  ABI: $ABI"
+echo "  Zig Target: $ZIG_TARGET"
+
+cd android/renderer
+
+# Clean previous build artifacts to avoid using cached builds for wrong architecture
+rm -rf zig-out .zig-cache
+
+# Build the renderer with Zig
+nix-shell ../../libghostty-vt/shell.nix --run "zig build \
+    -Dtarget=${ZIG_TARGET}.${API_LEVEL} \
+    -Doptimize=ReleaseFast \
+    --libc ../../${LIBC_FILE}" 2>&1 | tee "../../build/build-renderer-${ABI}.log"
+
+echo ""
+echo "Renderer build log saved to: build/build-renderer-${ABI}.log"
+
+# Copy the resulting renderer library
+if [ -f "zig-out/lib/libghostty_renderer.so" ]; then
+    cp zig-out/lib/libghostty_renderer.so "../../${OUTPUT_DIR}/"
+
+    # Patch the library to add GLESv3 as a needed library
+    # This tells the Android dynamic linker to load libGLESv3.so at runtime
+    echo "Patching libghostty_renderer.so to add GLESv3 dependency..."
+    if command -v patchelf &> /dev/null; then
+        patchelf --add-needed libGLESv3.so "../../${OUTPUT_DIR}/libghostty_renderer.so"
+        echo "✓ Added libGLESv3.so to DT_NEEDED section"
+    else
+        echo "Warning: patchelf not found, skipping library patching"
+        echo "  Install with: nix-env -iA nixpkgs.patchelf"
+    fi
+
+    echo "✓ Built renderer successfully: ${OUTPUT_DIR}/libghostty_renderer.so"
+else
+    echo "Error: libghostty_renderer.so not found"
+    exit 1
+fi
+
+cd ../..
+
+echo ""
+echo "✓ All libraries built successfully for ${ABI}"

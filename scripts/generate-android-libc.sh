@@ -66,6 +66,7 @@ cat > "$OUTPUT_FILE" << EOF
 include_dir=$SYSROOT/usr/include
 sys_include_dir=$SYSROOT/usr/include/$TRIPLE
 crt_dir=$SYSROOT/usr/lib/$TRIPLE/24
+lib_dir=$SYSROOT/usr/lib/$TRIPLE/24
 static_crt_dir=$GCC_LIB_DIR
 msvc_lib_dir=
 kernel32_lib_dir=

@@ -1,7 +1,7 @@
 # Ghostty Android - Makefile
 # Build system for cross-compiling libghostty-vt to Android targets
 
-.PHONY: help setup build-native build-android android android-studio clean clean-all check-env
+.PHONY: help setup build-native build-android android android-studio clean clean-all check-env test test-list
 
 # Configuration
 GHOSTTY_REPO = https://github.com/ghostty-org/ghostty.git
@@ -38,10 +38,12 @@ help:
 	@echo "  $(COLOR_BOLD)make android$(COLOR_RESET)        - Build everything and install to device"
 	@echo "  $(COLOR_BOLD)make setup$(COLOR_RESET)          - Clone Ghostty submodule and setup project"
 	@echo "  $(COLOR_BOLD)make check-env$(COLOR_RESET)      - Check required environment variables"
-	@echo "  $(COLOR_BOLD)make build-native$(COLOR_RESET)   - Build libghostty for all Android ABIs"
+	@echo "  $(COLOR_BOLD)make build-native$(COLOR_RESET)   - Build libghostty-vt + renderer for all Android ABIs"
 	@echo "  $(COLOR_BOLD)make build-android$(COLOR_RESET)  - Build the Android app (after build-native)"
 	@echo "  $(COLOR_BOLD)make install$(COLOR_RESET)        - Install APK to connected device"
 	@echo "  $(COLOR_BOLD)make logs$(COLOR_RESET)           - Show filtered adb logs for Ghostty app"
+	@echo "  $(COLOR_BOLD)make test$(COLOR_RESET)           - Run visual regression tests"
+	@echo "  $(COLOR_BOLD)make test-list$(COLOR_RESET)      - List all available tests"
 	@echo "  $(COLOR_BOLD)make clean$(COLOR_RESET)          - Clean build artifacts"
 	@echo "  $(COLOR_BOLD)make clean-all$(COLOR_RESET)      - Clean everything including Ghostty"
 	@echo ""
@@ -79,9 +81,9 @@ setup:
 	fi
 	@echo "$(COLOR_GREEN)✓ Setup complete$(COLOR_RESET)"
 
-## build-native: Build libghostty for Android targets
+## build-native: Build libghostty-vt and renderer for Android targets
 build-native: check-env setup
-	@echo "$(COLOR_BLUE)Building libghostty for Android...$(COLOR_RESET)"
+	@echo "$(COLOR_BLUE)Building libghostty-vt and renderer for Android...$(COLOR_RESET)"
 	@mkdir -p $(BUILD_DIR)
 	@for abi in $(ANDROID_ABIS); do \
 		echo ""; \
@@ -148,6 +150,15 @@ logs:
 	@adb logcat --pid=$$(adb shell pidof -s com.ghostty.android) 2>/dev/null || \
 		(echo "$(COLOR_YELLOW)App not running, showing all logs with package filter...$(COLOR_RESET)" && \
 		adb logcat | grep --line-buffered "com.ghostty.android")
+
+## test: Run visual regression tests
+test:
+	@echo "$(COLOR_BLUE)Running visual regression tests...$(COLOR_RESET)"
+	cd tests/visual && python3 run_tests.py
+
+## test-list: List all available tests
+test-list:
+	@cd tests/visual && python3 run_tests.py --list
 
 ## clean: Clean build artifacts
 clean:

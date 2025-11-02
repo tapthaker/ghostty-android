@@ -22,13 +22,6 @@ android {
             // Architectures we support
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
-
-        externalNativeBuild {
-            cmake {
-                cppFlags += ""
-                arguments += listOf("-DANDROID_STL=c++_shared")
-            }
-        }
     }
 
     buildTypes {
@@ -57,12 +50,8 @@ android {
         compose = true
     }
 
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
-        }
-    }
+    // Native builds are handled by our custom buildNativeLibs task
+    // which uses Makefile to build via Zig, not CMake
 
     packaging {
         resources {

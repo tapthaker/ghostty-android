@@ -92,10 +92,12 @@ class GhosttyBridge private constructor() {
         private const val TAG = "GhosttyBridge"
 
         init {
-            // Load libghostty-vt.so first (dependency)
+            // Load libghostty-vt.so (dependency)
             System.loadLibrary("ghostty-vt")
-            // Then load the JNI bridge library
-            System.loadLibrary("ghostty_bridge")
+
+            // Then load the renderer library (which includes JNI bridge)
+            // GLESv3 will be loaded automatically via ELF DT_NEEDED entry
+            System.loadLibrary("ghostty_renderer")
         }
 
         @Volatile

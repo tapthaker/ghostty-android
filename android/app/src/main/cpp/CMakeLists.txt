@@ -16,8 +16,12 @@ target_include_directories(ghostty_bridge PRIVATE
 )
 
 # Link against libghostty-vt (pre-built .so)
+# Link against libghostty_renderer (pre-built .so, built separately with Zig)
 target_link_libraries(ghostty_bridge
     ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libghostty-vt.so
+    ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libghostty_renderer.so
     android
     log
+    GLESv3  # OpenGL ES 3.1
+    EGL     # EGL for context management
 )

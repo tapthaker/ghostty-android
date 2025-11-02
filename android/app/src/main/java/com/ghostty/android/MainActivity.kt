@@ -11,16 +11,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.viewinterop.AndroidView
+import com.ghostty.android.renderer.GhosttyGLSurfaceView
 import com.ghostty.android.terminal.GhosttyBridge
 import com.ghostty.android.terminal.TerminalSession
 import com.ghostty.android.ui.InputToolbar
-import com.ghostty.android.ui.TerminalView
 import com.ghostty.android.ui.theme.GhosttyTheme
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var ghosttyBridge: GhosttyBridge
     private lateinit var terminalSession: TerminalSession
+    private var glSurfaceView: GhosttyGLSurfaceView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,7 +32,8 @@ class MainActivity : ComponentActivity() {
 
         // Initialize Ghostty bridge
         ghosttyBridge = GhosttyBridge.getInstance()
-        ghosttyBridge.createKeyEncoder()
+        // TODO: Enable when JNI key encoder is implemented
+        // ghosttyBridge.createKeyEncoder()
 
         // Create terminal session
         terminalSession = TerminalSession()
@@ -43,10 +46,25 @@ class MainActivity : ComponentActivity() {
                     session = terminalSession,
                     onKeyPress = { key ->
                         terminalSession.writeInput(key)
+                    },
+                    onGLSurfaceViewCreated = { view ->
+                        glSurfaceView = view
                     }
                 )
             }
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Pause the GL rendering thread
+        glSurfaceView?.onPauseView()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Resume the GL rendering thread
+        glSurfaceView?.onResumeView()
     }
 
     override fun onDestroy() {
@@ -59,7 +77,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun TerminalScreen(
     session: TerminalSession,
-    onKeyPress: (String) -> Unit
+    onKeyPress: (String) -> Unit,
+    onGLSurfaceViewCreated: (GhosttyGLSurfaceView) -> Unit
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -74,14 +93,21 @@ fun TerminalScreen(
             )
         }
     ) { paddingValues ->
-        TerminalView(
-            session = session,
+        // Use AndroidView to embed the native OpenGL surface view
+        AndroidView(
+            factory = { context ->
+                GhosttyGLSurfaceView(context).also { view ->
+                    // Notify the activity that the view has been created
+                    onGLSurfaceViewCreated(view)
+
+                    // Set up terminal size (will be calculated based on view size)
+                    // For now, use default terminal size
+                    view.setTerminalSize(80, 24)
+                }
+            },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues),
-            onTap = {
-                keyboardController?.show()
-            }
+                .padding(paddingValues)
         )
     }
 }
