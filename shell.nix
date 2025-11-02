@@ -47,6 +47,9 @@ pkgs.mkShell {
     curl
     wget
 
+    # Shell
+    zsh
+
     # Zig will be installed separately via download
   ];
 
@@ -78,6 +81,9 @@ pkgs.mkShell {
     echo "  make build-native  - Build libghostty for all Android targets"
     echo "  make clean         - Clean build artifacts"
     echo ""
+
+    # Switch to zsh
+    exec zsh
   '';
 
   # Environment variables for Android builds
