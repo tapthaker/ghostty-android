@@ -11,6 +11,7 @@ const c = @cImport({
 });
 
 const jni = @import("jni_bridge.zig");
+const Renderer = @import("renderer.zig");
 
 // Android logging utilities
 // NOTE: liblog.so is loaded via DT_NEEDED (added by patchelf)
@@ -45,10 +46,9 @@ const log = struct {
 // Global allocator
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
-// Renderer state (will be expanded in later phases)
+// Renderer state
 const RendererState = struct {
-    width: u32 = 0,
-    height: u32 = 0,
+    renderer: ?Renderer = null,
     initialized: bool = false,
 };
 
@@ -114,6 +114,11 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceCreat
     }
 
     // Initialize renderer
+    const allocator = gpa.allocator();
+    renderer_state.renderer = Renderer.init(allocator) catch |err| {
+        log.err("Failed to initialize renderer: {}", .{err});
+        return;
+    };
     renderer_state.initialized = true;
     log.info("Renderer initialized successfully", .{});
 }
@@ -131,11 +136,16 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceChang
 
     log.info("nativeOnSurfaceChanged: {d}x{d}", .{ width, height });
 
-    renderer_state.width = @intCast(width);
-    renderer_state.height = @intCast(height);
-
     // Set OpenGL viewport
     c.glViewport(0, 0, width, height);
+
+    // Update renderer with new dimensions
+    if (renderer_state.renderer) |*renderer| {
+        renderer.resize(@intCast(width), @intCast(height)) catch |err| {
+            log.err("Failed to resize renderer: {}", .{err});
+            return;
+        };
+    }
 
     log.info("Viewport updated to {d}x{d}", .{ width, height });
 }
@@ -154,20 +164,14 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnDrawFrame(
         return;
     }
 
-    // Clear the screen with a test color (purple-ish)
-    // This is just for proof of concept - will be replaced with actual rendering
-    log.debug("Setting clear color to purple...", .{});
-    c.glClearColor(0.4, 0.2, 0.6, 1.0);
-    log.debug("Calling glClear...", .{});
-    c.glClear(c.GL_COLOR_BUFFER_BIT);
-    log.debug("glClear complete", .{});
-
-    // Check for OpenGL errors
-    const err = c.glGetError();
-    if (err != c.GL_NO_ERROR) {
-        log.err("OpenGL error during frame: 0x{x}", .{err});
+    // Render using the renderer module
+    if (renderer_state.renderer) |*renderer| {
+        renderer.render() catch |err| {
+            log.err("Failed to render frame: {}", .{err});
+            return;
+        };
     } else {
-        log.debug("No GL errors", .{});
+        log.warn("Renderer not initialized", .{});
     }
 }
 
@@ -182,9 +186,12 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeDestroy(
 
     log.info("nativeDestroy", .{});
 
+    if (renderer_state.renderer) |*renderer| {
+        renderer.deinit();
+    }
+
     renderer_state.initialized = false;
-    renderer_state.width = 0;
-    renderer_state.height = 0;
+    renderer_state.renderer = null;
 
     log.info("Renderer destroyed", .{});
 }
