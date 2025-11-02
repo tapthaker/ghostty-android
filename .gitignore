@@ -1,6 +1,7 @@
 # Zig
 .zig/
 zig-cache/
+.zig-cache/
 zig-out/
 *.o
 *.a
