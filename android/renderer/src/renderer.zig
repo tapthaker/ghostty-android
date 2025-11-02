@@ -9,6 +9,7 @@ const Buffer = @import("buffer.zig").Buffer;
 const Texture = @import("texture.zig");
 const shaders = @import("shaders.zig");
 const shader_module = @import("shader.zig");
+const FontSystem = @import("font_system.zig").FontSystem;
 
 const log = std.log.scoped(.renderer);
 
@@ -16,6 +17,9 @@ const Self = @This();
 
 /// Allocator for renderer resources
 allocator: std.mem.Allocator,
+
+/// Font system for text rendering
+font_system: FontSystem,
 
 /// Surface dimensions in pixels
 width: u32 = 0,
@@ -131,55 +135,20 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     // Bind SSBO to binding point 1 (matches shader layout)
     cells_bg_buffer.bindBase(1);
 
+    // Initialize font system
+    var font_system = try FontSystem.init(allocator, 24);
+    errdefer font_system.deinit();
+
+    log.info("Font system initialized", .{});
+
     // Create font atlas textures
-    // For testing: 512x512 textures (will be updated with real font data later)
     const atlas_size: usize = 512;
 
-    // Grayscale atlas (R8 format for regular text)
-    // Allocate with zero-filled data, but embed test glyph directly
-    const grayscale_data = try allocator.alloc(u8, atlas_size * atlas_size);
+    // Populate grayscale atlas with actual font glyphs
+    const grayscale_data = try font_system.populateAtlas(atlas_size, atlas_size);
     defer allocator.free(grayscale_data);
-    @memset(grayscale_data, 0);
 
-    // Embed multiple test patterns for debugging
-    const glyph_size: usize = 16;
-
-    // Pattern 1: White square at (0, 0)
-    for (0..glyph_size) |y| {
-        for (0..glyph_size) |x| {
-            const idx = y * atlas_size + x;
-            grayscale_data[idx] = 255; // White
-        }
-    }
-
-    // Pattern 2: Gradient at (32, 0) - horizontal gradient from dark to light
-    for (0..glyph_size) |y| {
-        for (0..glyph_size) |x| {
-            const idx = y * atlas_size + (x + 32);
-            grayscale_data[idx] = @intCast(x * 16); // Gradient 0-255
-        }
-    }
-
-    // Pattern 3: Checkerboard at (64, 0)
-    for (0..glyph_size) |y| {
-        for (0..glyph_size) |x| {
-            const idx = y * atlas_size + (x + 64);
-            const checker = ((x / 4) + (y / 4)) % 2;
-            grayscale_data[idx] = if (checker == 0) 255 else 128;
-        }
-    }
-
-    // Pattern 4: Cross pattern at (96, 0)
-    for (0..glyph_size) |y| {
-        for (0..glyph_size) |x| {
-            const idx = y * atlas_size + (x + 96);
-            if (x == 8 or y == 8) {
-                grayscale_data[idx] = 255; // White cross
-            } else {
-                grayscale_data[idx] = 64; // Dark background
-            }
-        }
-    }
+    log.info("Font atlas populated with glyphs", .{});
 
     const atlas_grayscale = try Texture.init(.{
         .format = .red,
@@ -265,62 +234,44 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     // Note: We leave the program bound after setting uniforms
     // The uniforms are part of the program state and will persist
 
-    // Test glyphs using different patterns from the atlas
-    // Each glyph references a different test pattern for debugging
-    const test_glyphs = [_]shaders.CellText{
-        .{
-            .glyph_pos = .{ 0, 0 }, // Pattern 1: White square
-            .glyph_size = .{ glyph_size, glyph_size },
-            .bearings = .{ 0, @intCast(glyph_size) },
-            .grid_pos = .{ 0, 5 }, // Terminal position (column 0, row 5)
-            .color = .{ 255, 255, 255, 255 }, // White
-            .atlas = .grayscale,
-            .bools = .{},
-        },
-        .{
-            .glyph_pos = .{ 32, 0 }, // Pattern 2: Gradient
-            .glyph_size = .{ glyph_size, glyph_size },
-            .bearings = .{ 0, @intCast(glyph_size) },
-            .grid_pos = .{ 1, 5 }, // Column 1, row 5
-            .color = .{ 255, 255, 255, 255 }, // White
-            .atlas = .grayscale,
-            .bools = .{},
-        },
-        .{
-            .glyph_pos = .{ 64, 0 }, // Pattern 3: Checkerboard
-            .glyph_size = .{ glyph_size, glyph_size },
-            .bearings = .{ 0, @intCast(glyph_size) },
-            .grid_pos = .{ 2, 5 }, // Column 2, row 5
-            .color = .{ 255, 0, 0, 255 }, // Red tint
-            .atlas = .grayscale,
-            .bools = .{},
-        },
-        .{
-            .glyph_pos = .{ 96, 0 }, // Pattern 4: Cross
-            .glyph_size = .{ glyph_size, glyph_size },
-            .bearings = .{ 0, @intCast(glyph_size) },
-            .grid_pos = .{ 3, 5 }, // Column 3, row 5
-            .color = .{ 0, 255, 0, 255 }, // Green tint
-            .atlas = .grayscale,
-            .bools = .{},
-        },
-    };
+    // Generate test text: "Hello World!"
+    const test_text = "Hello World!";
+    var text_glyphs = try allocator.alloc(shaders.CellText, test_text.len);
+    defer allocator.free(text_glyphs);
 
-    // Upload test glyphs to GPU
-    try glyphs_buffer.sync(&test_glyphs);
-    const num_test_glyphs: u32 = test_glyphs.len;
-    log.info("Uploaded {} test glyphs to GPU", .{num_test_glyphs});
-    log.info("Test glyph 0: grid_pos=({},{}), glyph_size={}x{}, bearings=({},{})", .{
-        test_glyphs[0].grid_pos[0], test_glyphs[0].grid_pos[1],
-        test_glyphs[0].glyph_size[0], test_glyphs[0].glyph_size[1],
-        test_glyphs[0].bearings[0], test_glyphs[0].bearings[1],
-    });
+    for (test_text, 0..) |char, i| {
+        text_glyphs[i] = font_system.makeCellText(
+            char,
+            @intCast(i), // Column
+            5, // Row 5
+            .{ 255, 255, 255, 255 }, // White text
+        );
+    }
+
+    // Upload text glyphs to GPU
+    try glyphs_buffer.sync(text_glyphs);
+    const num_test_glyphs: u32 = @intCast(text_glyphs.len);
+    log.info("Uploaded {} text glyphs to GPU: \"{s}\"", .{ num_test_glyphs, test_text });
+
+    // Log all glyphs for debugging
+    for (text_glyphs, 0..) |glyph, i| {
+        log.info("Glyph {}: '{c}' grid=({},{}), atlas=({},{}), size=({},{})", .{
+            i,
+            test_text[i],
+            glyph.grid_pos[0],
+            glyph.grid_pos[1],
+            glyph.glyph_pos[0],
+            glyph.glyph_pos[1],
+            glyph.glyph_size[0],
+            glyph.glyph_size[1],
+        });
+    }
 
     // Initialize default uniforms
     const uniforms = shaders.Uniforms{
         .projection_matrix = shaders.createOrthoMatrix(800.0, 600.0), // Will be updated on resize
         .screen_size = .{ 800.0, 600.0 },
-        .cell_size = .{ 20.0, 30.0 }, // Increased cell size for testing
+        .cell_size = font_system.getCellSize(), // Use actual font metrics
         .grid_size_packed_2u16 = shaders.Uniforms.pack2u16(80, 24), // 80x24 default
         .grid_padding = .{ 0.0, 0.0, 0.0, 0.0 },
         .padding_extend = .{},
@@ -336,10 +287,13 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         },
     };
 
+    log.info("Cell size from font: {d}x{d}", .{ uniforms.cell_size[0], uniforms.cell_size[1] });
+
     log.info("Renderer initialized successfully", .{});
 
     return .{
         .allocator = allocator,
+        .font_system = font_system,
         .uniforms_buffer = uniforms_buffer,
         .uniforms = uniforms,
         .bg_color_pipeline = bg_color_pipeline,
@@ -365,6 +319,7 @@ pub fn deinit(self: *Self) void {
     self.cells_bg_buffer.deinit();
     self.bg_color_pipeline.deinit();
     self.uniforms_buffer.deinit();
+    self.font_system.deinit();
 }
 
 /// Update surface size and recalculate projection matrix
@@ -447,6 +402,7 @@ pub fn render(self: *Self) !void {
 
     // Draw glyphs using instanced rendering (4 vertices per glyph instance)
     if (self.num_test_glyphs > 0) {
+        log.debug("Drawing {} glyphs with instanced rendering", .{self.num_test_glyphs});
         gl.drawArraysInstanced(gl.GL_TRIANGLE_STRIP, 0, 4, @intCast(self.num_test_glyphs));
         gl.checkError() catch |err| {
             log.err("GL error after drawArraysInstanced: {}", .{err});

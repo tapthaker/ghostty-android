@@ -10,12 +10,24 @@ pub fn build(b: *std.Build) void {
         std.log.warn("Warning: Target should be Android (e.g., aarch64-linux-android)", .{});
     }
 
+    // Get FreeType dependency
+    // Note: Disable libpng to avoid linking issues with libm on Android
+    // Note: Harfbuzz not needed for Phase 1 (basic ASCII rendering)
+    const freetype_dep = b.dependency("freetype", .{
+        .target = target,
+        .optimize = optimize,
+        .@"enable-libpng" = false,
+    });
+
     // Create a module for the library
     const lib_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
+
+    // Add FreeType module
+    lib_mod.addImport("freetype", freetype_dep.module("freetype"));
 
     // Create the shared library for Android
     const lib = b.addLibrary(.{
@@ -26,6 +38,9 @@ pub fn build(b: *std.Build) void {
 
     // Link libc (required for JNI)
     lib.linkLibC();
+
+    // Link FreeType library
+    lib.linkLibrary(freetype_dep.artifact("freetype"));
 
     // Note: We need OpenGL ES 3.1 symbols, but can't link them during cross-compilation.
     // The symbols will be left undefined and must be resolved by the Android dynamic linker.
