@@ -84,8 +84,10 @@ class GhosttyRenderer : GLSurfaceView.Renderer {
      * @param gl The GL10 interface (not used, we use native GLES3)
      */
     override fun onDrawFrame(gl: GL10?) {
+        Log.v(TAG, "onDrawFrame called")
         try {
             nativeOnDrawFrame()
+            Log.v(TAG, "onDrawFrame: native call completed")
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeOnDrawFrame", e)
             // Don't throw here to avoid crashing the render thread

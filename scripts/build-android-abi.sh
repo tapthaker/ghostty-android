@@ -109,12 +109,13 @@ echo "Renderer build log saved to: build/build-renderer-${ABI}.log"
 if [ -f "zig-out/lib/libghostty_renderer.so" ]; then
     cp zig-out/lib/libghostty_renderer.so "../../${OUTPUT_DIR}/"
 
-    # Patch the library to add GLESv3 as a needed library
-    # This tells the Android dynamic linker to load libGLESv3.so at runtime
-    echo "Patching libghostty_renderer.so to add GLESv3 dependency..."
+    # Patch the library to add GLESv3 and liblog as needed libraries
+    # This tells the Android dynamic linker to load these at runtime
+    echo "Patching libghostty_renderer.so to add dependencies..."
     if command -v patchelf &> /dev/null; then
         patchelf --add-needed libGLESv3.so "../../${OUTPUT_DIR}/libghostty_renderer.so"
-        echo "✓ Added libGLESv3.so to DT_NEEDED section"
+        patchelf --add-needed liblog.so "../../${OUTPUT_DIR}/libghostty_renderer.so"
+        echo "✓ Added libGLESv3.so and liblog.so to DT_NEEDED section"
     else
         echo "Warning: patchelf not found, skipping library patching"
         echo "  Install with: nix-env -iA nixpkgs.patchelf"

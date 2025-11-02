@@ -13,33 +13,32 @@ const c = @cImport({
 const jni = @import("jni_bridge.zig");
 
 // Android logging utilities
-// NOTE: Disabled for now because Zig can't link against liblog during cross-compilation
-// TODO: Re-enable using JNI callbacks to Java logging
+// NOTE: liblog.so is loaded via DT_NEEDED (added by patchelf)
 const log = struct {
-    const TAG = "GhosttyRenderer";
+    const TAG = "GhosttyRendererNative";
 
     fn info(comptime fmt: []const u8, args: anytype) void {
-        _ = fmt;
-        _ = args;
-        // Disabled: _ = c.__android_log_print(c.ANDROID_LOG_INFO, TAG, "%s", msg.ptr);
+        var buf: [512]u8 = undefined;
+        const msg = std.fmt.bufPrint(&buf, fmt, args) catch "Log format error";
+        _ = c.__android_log_print(c.ANDROID_LOG_INFO, TAG, "%s", msg.ptr);
     }
 
     fn warn(comptime fmt: []const u8, args: anytype) void {
-        _ = fmt;
-        _ = args;
-        // Disabled: _ = c.__android_log_print(c.ANDROID_LOG_WARN, TAG, "%s", msg.ptr);
+        var buf: [512]u8 = undefined;
+        const msg = std.fmt.bufPrint(&buf, fmt, args) catch "Log format error";
+        _ = c.__android_log_print(c.ANDROID_LOG_WARN, TAG, "%s", msg.ptr);
     }
 
     fn err(comptime fmt: []const u8, args: anytype) void {
-        _ = fmt;
-        _ = args;
-        // Disabled: _ = c.__android_log_print(c.ANDROID_LOG_ERROR, TAG, "%s", msg.ptr);
+        var buf: [512]u8 = undefined;
+        const msg = std.fmt.bufPrint(&buf, fmt, args) catch "Log format error";
+        _ = c.__android_log_print(c.ANDROID_LOG_ERROR, TAG, "%s", msg.ptr);
     }
 
     fn debug(comptime fmt: []const u8, args: anytype) void {
-        _ = fmt;
-        _ = args;
-        // Disabled: _ = c.__android_log_print(c.ANDROID_LOG_DEBUG, TAG, "%s", msg.ptr);
+        var buf: [512]u8 = undefined;
+        const msg = std.fmt.bufPrint(&buf, fmt, args) catch "Log format error";
+        _ = c.__android_log_print(c.ANDROID_LOG_DEBUG, TAG, "%s", msg.ptr);
     }
 };
 
@@ -157,13 +156,18 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnDrawFrame(
 
     // Clear the screen with a test color (purple-ish)
     // This is just for proof of concept - will be replaced with actual rendering
+    log.debug("Setting clear color to purple...", .{});
     c.glClearColor(0.4, 0.2, 0.6, 1.0);
+    log.debug("Calling glClear...", .{});
     c.glClear(c.GL_COLOR_BUFFER_BIT);
+    log.debug("glClear complete", .{});
 
     // Check for OpenGL errors
     const err = c.glGetError();
     if (err != c.GL_NO_ERROR) {
         log.err("OpenGL error during frame: 0x{x}", .{err});
+    } else {
+        log.debug("No GL errors", .{});
     }
 }
 

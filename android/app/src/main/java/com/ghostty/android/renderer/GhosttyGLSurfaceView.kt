@@ -50,14 +50,17 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
             0   // stencil
         )
 
+        // Make the GL surface visible on top of the window background
+        // This is needed because GLSurfaceView renders in a separate window by default
+        setZOrderOnTop(true)
+
         // Create and set the renderer
         renderer = GhosttyRenderer()
         setRenderer(renderer)
 
-        // Set render mode to only render when explicitly requested
-        // This saves battery compared to RENDERMODE_CONTINUOUSLY
-        // We'll call requestRender() when terminal state changes
-        renderMode = RENDERMODE_WHEN_DIRTY
+        // Set render mode to continuously for proof of concept
+        // TODO: Change to RENDERMODE_WHEN_DIRTY once we have proper terminal update callbacks
+        renderMode = RENDERMODE_CONTINUOUSLY
 
         Log.d(TAG, "GL Surface View initialized")
     }
