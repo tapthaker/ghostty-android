@@ -36,7 +36,7 @@ out CellTextVertexOut {
     vec2 tex_coord; // Pixel coordinates - will be normalized in fragment shader
 } out_data;
 
-layout(binding = 1, std430) readonly buffer bg_cells {
+layout(binding = 1, std430) buffer bg_cells {
     uint bg_colors[];
 };
 

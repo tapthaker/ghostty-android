@@ -333,8 +333,8 @@ pub const Texture = struct {
         );
     }
 
-    pub fn active(unit: c.GLuint) void {
-        c.glActiveTexture(c.GL_TEXTURE0 + unit);
+    pub fn active(unit: u32) void {
+        c.glActiveTexture(@as(c.GLenum, c.GL_TEXTURE0) + @as(c.GLenum, unit));
     }
 
     pub fn delete(self: Texture) void {

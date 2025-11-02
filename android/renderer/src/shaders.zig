@@ -91,6 +91,13 @@ pub const Uniforms = extern struct {
     }
 };
 
+/// Atlas dimensions uniform buffer (UBO binding point 2).
+/// Used by cell_text fragment shader to normalize texture coordinates.
+pub const AtlasDimensions = extern struct {
+    grayscale_size: [2]f32 align(8),
+    color_size: [2]f32 align(8),
+};
+
 /// Vertex attributes for the cell_text shader (text rendering).
 /// This is a single parameter for instanced rendering of text glyphs.
 pub const CellText = extern struct {

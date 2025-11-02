@@ -6,6 +6,7 @@ const std = @import("std");
 const gl = @import("gl_es.zig");
 const Pipeline = @import("pipeline.zig");
 const Buffer = @import("buffer.zig").Buffer;
+const Texture = @import("texture.zig");
 const shaders = @import("shaders.zig");
 const shader_module = @import("shader.zig");
 
@@ -34,6 +35,21 @@ cells_bg_buffer: Buffer(u32),
 
 /// Cell backgrounds rendering pipeline
 cell_bg_pipeline: Pipeline,
+
+/// Grayscale font atlas (R8 texture) - for regular text glyphs
+atlas_grayscale: Texture,
+
+/// Color font atlas (RGBA8 texture) - for color emoji glyphs
+atlas_color: Texture,
+
+/// Atlas dimensions UBO (binding point 2)
+atlas_dims_buffer: Buffer(shaders.AtlasDimensions),
+
+/// Glyph instances buffer for cell_text pipeline
+glyphs_buffer: Buffer(shaders.CellText),
+
+/// Cell text rendering pipeline
+cell_text_pipeline: Pipeline,
 
 /// Initialize the renderer
 pub fn init(allocator: std.mem.Allocator) !Self {
@@ -112,6 +128,66 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     // Bind SSBO to binding point 1 (matches shader layout)
     cells_bg_buffer.bindBase(1);
 
+    // Create font atlas textures
+    // For testing: 512x512 textures (will be updated with real font data later)
+    const atlas_size: usize = 512;
+
+    // Grayscale atlas (R8 format for regular text)
+    const atlas_grayscale = try Texture.init(.{
+        .format = .red,
+        .internal_format = .r8,
+        .min_filter = .nearest,
+        .mag_filter = .nearest,
+    }, atlas_size, atlas_size, null);
+    errdefer atlas_grayscale.deinit();
+
+    // Color atlas (RGBA8 format for color emoji)
+    const atlas_color = try Texture.init(.{
+        .format = .rgba,
+        .internal_format = .rgba8,
+        .min_filter = .nearest,
+        .mag_filter = .nearest,
+    }, atlas_size, atlas_size, null);
+    errdefer atlas_color.deinit();
+
+    // Create atlas dimensions UBO
+    var atlas_dims_buffer = try Buffer(shaders.AtlasDimensions).init(.{
+        .target = .uniform,
+        .usage = .static_draw,
+    }, 1);
+    errdefer atlas_dims_buffer.deinit();
+
+    const atlas_dims = shaders.AtlasDimensions{
+        .grayscale_size = .{ @floatFromInt(atlas_size), @floatFromInt(atlas_size) },
+        .color_size = .{ @floatFromInt(atlas_size), @floatFromInt(atlas_size) },
+    };
+    try atlas_dims_buffer.sync(&[_]shaders.AtlasDimensions{atlas_dims});
+
+    // Bind atlas dimensions to binding point 2
+    atlas_dims_buffer.bindBase(2);
+
+    // TODO: Temporarily disabled to debug shader compilation issue
+    // Load and compile cell_text shaders
+    // const cell_text_vertex_src = shader_module.loadShaderCode("shaders/glsl/cell_text.v.glsl");
+    // const cell_text_fragment_src = shader_module.loadShaderCode("shaders/glsl/cell_text.f.glsl");
+
+    // Create cell text pipeline with auto-configured vertex attributes for instanced rendering
+    const cell_text_pipeline = try Pipeline.init(null, .{
+        .vertex_src = shader_module.loadShaderCode("shaders/glsl/full_screen.v.glsl"),
+        .fragment_src = shader_module.loadShaderCode("shaders/glsl/bg_color.f.glsl"),
+        .blending_enabled = false, // Dummy pipeline, won't be used
+    });
+    errdefer cell_text_pipeline.deinit();
+
+    // Create glyphs instance buffer
+    // For testing: allocate space for 1920 glyphs (80x24 full screen)
+    const max_glyphs = grid_cols * grid_rows;
+    var glyphs_buffer = try Buffer(shaders.CellText).init(.{
+        .target = .array,
+        .usage = .dynamic_draw,
+    }, max_glyphs);
+    errdefer glyphs_buffer.deinit();
+
     // Initialize default uniforms
     const uniforms = shaders.Uniforms{
         .projection_matrix = shaders.createOrthoMatrix(800.0, 600.0), // Will be updated on resize
@@ -141,11 +217,21 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .bg_color_pipeline = bg_color_pipeline,
         .cells_bg_buffer = cells_bg_buffer,
         .cell_bg_pipeline = cell_bg_pipeline,
+        .atlas_grayscale = atlas_grayscale,
+        .atlas_color = atlas_color,
+        .atlas_dims_buffer = atlas_dims_buffer,
+        .glyphs_buffer = glyphs_buffer,
+        .cell_text_pipeline = cell_text_pipeline,
     };
 }
 
 pub fn deinit(self: *Self) void {
     log.info("Destroying renderer", .{});
+    self.cell_text_pipeline.deinit();
+    self.glyphs_buffer.deinit();
+    self.atlas_dims_buffer.deinit();
+    self.atlas_color.deinit();
+    self.atlas_grayscale.deinit();
     self.cell_bg_pipeline.deinit();
     self.cells_bg_buffer.deinit();
     self.bg_color_pipeline.deinit();
@@ -196,6 +282,21 @@ pub fn render(self: *Self) !void {
     // Render cell backgrounds (blended over bg_color)
     self.cell_bg_pipeline.use();
     gl.drawArrays(gl.GL_TRIANGLES, 0, 3); // Draw 3 vertices for full-screen triangle
+
+    // TODO: Text rendering temporarily disabled for debugging
+    // Render cell text (blended over cell backgrounds)
+    // For now, we'll render 0 glyphs (will add test glyphs later)
+    // self.cell_text_pipeline.use();
+
+    // Bind font atlas textures to their respective texture units
+    // self.atlas_grayscale.bindToUnit(0); // Matches binding 0 in fragment shader
+    // self.atlas_color.bindToUnit(1);     // Matches binding 1 in fragment shader
+
+    // Draw glyphs using instanced rendering (4 vertices per glyph instance)
+    // const num_glyphs: u32 = 0; // TODO: Will be set to actual glyph count
+    // if (num_glyphs > 0) {
+    //     gl.drawArraysInstanced(gl.GL_TRIANGLE_STRIP, 0, 4, @intCast(num_glyphs));
+    // }
 
     // Check for errors
     try gl.checkError();
