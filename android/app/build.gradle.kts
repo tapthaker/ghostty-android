@@ -23,13 +23,12 @@ android {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
 
-        // JNI bridge will be built separately and linked
-        // externalNativeBuild {
-        //     cmake {
-        //         cppFlags += ""
-        //         arguments += listOf("-DANDROID_STL=c++_shared")
-        //     }
-        // }
+        externalNativeBuild {
+            cmake {
+                cppFlags += ""
+                arguments += listOf("-DANDROID_STL=c++_shared")
+            }
+        }
     }
 
     buildTypes {
@@ -58,13 +57,12 @@ android {
         compose = true
     }
 
-    // JNI bridge will be built separately and linked
-    // externalNativeBuild {
-    //     cmake {
-    //         path = file("src/main/cpp/CMakeLists.txt")
-    //         version = "3.22.1"
-    //     }
-    // }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 
     packaging {
         resources {

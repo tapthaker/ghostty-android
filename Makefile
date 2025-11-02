@@ -41,6 +41,7 @@ help:
 	@echo "  $(COLOR_BOLD)make build-native$(COLOR_RESET)   - Build libghostty for all Android ABIs"
 	@echo "  $(COLOR_BOLD)make build-android$(COLOR_RESET)  - Build the Android app (after build-native)"
 	@echo "  $(COLOR_BOLD)make install$(COLOR_RESET)        - Install APK to connected device"
+	@echo "  $(COLOR_BOLD)make logs$(COLOR_RESET)           - Show filtered adb logs for Ghostty app"
 	@echo "  $(COLOR_BOLD)make clean$(COLOR_RESET)          - Clean build artifacts"
 	@echo "  $(COLOR_BOLD)make clean-all$(COLOR_RESET)      - Clean everything including Ghostty"
 	@echo ""
@@ -139,6 +140,14 @@ install: build-android
 	@echo "$(COLOR_BLUE)Installing to device...$(COLOR_RESET)"
 	cd android && ./gradlew installDebug
 	@echo "$(COLOR_GREEN)✓ App installed$(COLOR_RESET)"
+
+## logs: Show filtered adb logs for Ghostty app package
+logs:
+	@echo "$(COLOR_BLUE)Showing logs for com.ghostty.android...$(COLOR_RESET)"
+	@echo "$(COLOR_YELLOW)Press Ctrl+C to stop$(COLOR_RESET)"
+	@adb logcat --pid=$$(adb shell pidof -s com.ghostty.android) 2>/dev/null || \
+		(echo "$(COLOR_YELLOW)App not running, showing all logs with package filter...$(COLOR_RESET)" && \
+		adb logcat | grep --line-buffered "com.ghostty.android")
 
 ## clean: Clean build artifacts
 clean:

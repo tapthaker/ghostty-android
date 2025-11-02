@@ -68,7 +68,7 @@ Java_com_ghostty_android_terminal_GhosttyBridge_nativeEncodeKey(
     }
 
     // Set key event properties
-    ghostty_key_event_set_action(event, GHOSTTY_KEY_PRESS);
+    ghostty_key_event_set_action(event, GHOSTTY_KEY_ACTION_PRESS);
     ghostty_key_event_set_key(event, (GhosttyKey)key_code);
     ghostty_key_event_set_mods(event, (GhosttyMods)modifiers);
 
