@@ -5,6 +5,9 @@ import android.opengl.GLSurfaceView
 import android.util.AttributeSet
 import android.util.Log
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * OpenGL ES surface view for Ghostty terminal rendering.
@@ -14,7 +17,7 @@ import android.view.MotionEvent
  * - OpenGL ES 3.1 context creation
  * - Renderer thread management
  * - Surface lifecycle (pause/resume)
- * - Input events (future)
+ * - Pinch-to-zoom for font size adjustment
  */
 class GhosttyGLSurfaceView @JvmOverloads constructor(
     context: Context,
@@ -27,9 +30,16 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         // OpenGL ES version requirements
         private const val GLES_MAJOR_VERSION = 3
         private const val GLES_CONTEXT_CLIENT_VERSION = 3 // Request ES 3.x
+
+        // Font size constraints
+        private const val MIN_FONT_SIZE = 8f
+        private const val MAX_FONT_SIZE = 96f
+        private const val DEFAULT_FONT_SIZE = 48f
     }
 
     private val renderer: GhosttyRenderer
+    private val scaleGestureDetector: ScaleGestureDetector
+    private var currentFontSize = DEFAULT_FONT_SIZE
 
     init {
         Log.d(TAG, "Initializing Ghostty GL Surface View")
@@ -61,6 +71,31 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         // Set render mode to continuously for proof of concept
         // TODO: Change to RENDERMODE_WHEN_DIRTY once we have proper terminal update callbacks
         renderMode = RENDERMODE_CONTINUOUSLY
+
+        // Initialize pinch-to-zoom gesture detector
+        scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                // Calculate new font size based on scale factor
+                val scaleFactor = detector.scaleFactor
+                val newFontSize = currentFontSize * scaleFactor
+
+                // Clamp to valid range
+                val clampedSize = max(MIN_FONT_SIZE, min(MAX_FONT_SIZE, newFontSize))
+
+                if (clampedSize != currentFontSize) {
+                    currentFontSize = clampedSize
+                    Log.i(TAG, "Font size changed to: $currentFontSize")
+
+                    // Update font size on GL thread
+                    queueEvent {
+                        renderer.setFontSize(currentFontSize.toInt())
+                        requestRender()
+                    }
+                }
+
+                return true
+            }
+        })
 
         Log.d(TAG, "GL Surface View initialized")
     }
@@ -128,24 +163,30 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     }
 
     /**
-     * Handle touch events (future implementation).
-     *
-     * Currently just logs the event.
-     * Future: Implement touch-based scrolling, selection, etc.
+     * Handle touch events for pinch-to-zoom and other gestures.
      */
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        when (event.action) {
-            MotionEvent.ACTION_DOWN -> {
-                Log.v(TAG, "Touch down at (${event.x}, ${event.y})")
-                // Future: Handle touch down
-            }
-            MotionEvent.ACTION_MOVE -> {
-                Log.v(TAG, "Touch move to (${event.x}, ${event.y})")
-                // Future: Handle touch move (scrolling, selection)
-            }
-            MotionEvent.ACTION_UP -> {
-                Log.v(TAG, "Touch up at (${event.x}, ${event.y})")
-                // Future: Handle touch up
+        // First, let the scale gesture detector handle the event
+        val scaleHandled = scaleGestureDetector.onTouchEvent(event)
+
+        // Also handle basic touch events for future features
+        if (!scaleHandled) {
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    Log.v(TAG, "Touch down at (${event.x}, ${event.y})")
+                    // Future: Handle touch down
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    // Only log if not scaling
+                    if (!scaleGestureDetector.isInProgress) {
+                        Log.v(TAG, "Touch move to (${event.x}, ${event.y})")
+                        // Future: Handle touch move (scrolling, selection)
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    Log.v(TAG, "Touch up at (${event.x}, ${event.y})")
+                    // Future: Handle touch up
+                }
             }
         }
 

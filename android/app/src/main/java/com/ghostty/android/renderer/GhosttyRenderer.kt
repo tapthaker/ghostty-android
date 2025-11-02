@@ -35,6 +35,7 @@ class GhosttyRenderer : GLSurfaceView.Renderer {
     private external fun nativeOnDrawFrame()
     private external fun nativeDestroy()
     private external fun nativeSetTerminalSize(cols: Int, rows: Int)
+    private external fun nativeSetFontSize(fontSize: Int)
 
     /**
      * Called when the OpenGL surface is created.
@@ -139,5 +140,22 @@ class GhosttyRenderer : GLSurfaceView.Renderer {
     fun onResume() {
         Log.d(TAG, "onResume")
         // Future: Could resume background work here
+    }
+
+    /**
+     * Update the font size dynamically.
+     *
+     * This will rebuild the font atlas and update the renderer.
+     *
+     * @param fontSize Font size in pixels
+     */
+    fun setFontSize(fontSize: Int) {
+        Log.i(TAG, "setFontSize: $fontSize")
+
+        try {
+            nativeSetFontSize(fontSize)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeSetFontSize", e)
+        }
     }
 }

@@ -136,16 +136,20 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     cells_bg_buffer.bindBase(1);
 
     // Initialize font system
-    var font_system = try FontSystem.init(allocator, 24);
+    var font_system = try FontSystem.init(allocator, 48);
     errdefer font_system.deinit();
 
     log.info("Font system initialized", .{});
 
-    // Create font atlas textures
-    const atlas_size: usize = 512;
+    // Get dynamic atlas dimensions based on font size
+    const font_atlas_dims = font_system.getAtlasDimensions();
+    const atlas_width: u32 = font_atlas_dims[0];
+    const atlas_height: u32 = font_atlas_dims[1];
+
+    log.info("Atlas dimensions: {d}x{d}", .{ atlas_width, atlas_height });
 
     // Populate grayscale atlas with actual font glyphs
-    const grayscale_data = try font_system.populateAtlas(atlas_size, atlas_size);
+    const grayscale_data = try font_system.populateAtlas(atlas_width, atlas_height);
     defer allocator.free(grayscale_data);
 
     log.info("Font atlas populated with glyphs", .{});
@@ -155,12 +159,12 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .internal_format = .r8,
         .min_filter = .nearest,
         .mag_filter = .nearest,
-    }, atlas_size, atlas_size, grayscale_data);
+    }, atlas_width, atlas_height, grayscale_data);
     errdefer atlas_grayscale.deinit();
 
     // Color atlas (RGBA8 format for color emoji)
     // Allocate with zero-filled data to ensure proper storage allocation on Mali
-    const color_data = try allocator.alloc(u8, atlas_size * atlas_size * 4); // RGBA = 4 bytes per pixel
+    const color_data = try allocator.alloc(u8, atlas_width * atlas_height * 4); // RGBA = 4 bytes per pixel
     defer allocator.free(color_data);
     @memset(color_data, 0);
 
@@ -169,7 +173,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .internal_format = .rgba8,
         .min_filter = .nearest,
         .mag_filter = .nearest,
-    }, atlas_size, atlas_size, color_data);
+    }, atlas_width, atlas_height, color_data);
     errdefer atlas_color.deinit();
 
     // Create atlas dimensions UBO
@@ -180,8 +184,8 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     errdefer atlas_dims_buffer.deinit();
 
     const atlas_dims = shaders.AtlasDimensions{
-        .grayscale_size = .{ @floatFromInt(atlas_size), @floatFromInt(atlas_size) },
-        .color_size = .{ @floatFromInt(atlas_size), @floatFromInt(atlas_size) },
+        .grayscale_size = .{ @floatFromInt(atlas_width), @floatFromInt(atlas_height) },
+        .color_size = .{ @floatFromInt(atlas_width), @floatFromInt(atlas_height) },
     };
     try atlas_dims_buffer.sync(&[_]shaders.AtlasDimensions{atlas_dims});
 
@@ -415,4 +419,89 @@ pub fn render(self: *Self) !void {
 /// Update background color
 pub fn setBackgroundColor(self: *Self, r: u8, g: u8, b: u8, a: u8) void {
     self.uniforms.bg_color_packed_4u8 = shaders.Uniforms.pack4u8(r, g, b, a);
+}
+
+/// Update font size dynamically by rebuilding the font system and atlases
+pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
+    log.info("Updating font size to {d}px", .{new_font_size});
+
+    // 1. Deinitialize old font system
+    self.font_system.deinit();
+
+    // 2. Create new font system with new size
+    self.font_system = try FontSystem.init(self.allocator, new_font_size);
+    errdefer self.font_system.deinit();
+
+    log.info("New font system initialized with size {d}px", .{new_font_size});
+
+    // 3. Get new atlas dimensions
+    const font_atlas_dims = self.font_system.getAtlasDimensions();
+    const atlas_width: u32 = font_atlas_dims[0];
+    const atlas_height: u32 = font_atlas_dims[1];
+
+    log.info("New atlas dimensions: {d}x{d}", .{ atlas_width, atlas_height });
+
+    // 4. Rebuild grayscale atlas
+    const grayscale_data = try self.font_system.populateAtlas(atlas_width, atlas_height);
+    defer self.allocator.free(grayscale_data);
+
+    // Update the existing texture with new data
+    self.atlas_grayscale.deinit();
+    self.atlas_grayscale = try Texture.init(.{
+        .format = .red,
+        .internal_format = .r8,
+        .min_filter = .nearest,
+        .mag_filter = .nearest,
+    }, atlas_width, atlas_height, grayscale_data);
+
+    log.info("Grayscale atlas updated", .{});
+
+    // 5. Rebuild color atlas (empty for now)
+    const color_data = try self.allocator.alloc(u8, atlas_width * atlas_height * 4);
+    defer self.allocator.free(color_data);
+    @memset(color_data, 0);
+
+    self.atlas_color.deinit();
+    self.atlas_color = try Texture.init(.{
+        .format = .rgba,
+        .internal_format = .rgba8,
+        .min_filter = .nearest,
+        .mag_filter = .nearest,
+    }, atlas_width, atlas_height, color_data);
+
+    log.info("Color atlas updated", .{});
+
+    // 6. Update atlas dimensions UBO
+    const atlas_dims = shaders.AtlasDimensions{
+        .grayscale_size = .{ @floatFromInt(atlas_width), @floatFromInt(atlas_height) },
+        .color_size = .{ @floatFromInt(atlas_width), @floatFromInt(atlas_height) },
+    };
+    try self.atlas_dims_buffer.sync(&[_]shaders.AtlasDimensions{atlas_dims});
+
+    log.info("Atlas dimensions buffer updated", .{});
+
+    // 7. Update cell size in uniforms
+    const cell_size = self.font_system.getCellSize();
+    self.uniforms.cell_size = cell_size;
+    try self.uniforms_buffer.sync(&[_]shaders.Uniforms{self.uniforms});
+
+    log.info("Cell size updated to: {}x{}", .{ cell_size[0], cell_size[1] });
+
+    // 8. Regenerate test glyphs with new font system
+    const test_string = "Hello World!";
+    var test_glyphs: [test_string.len]shaders.CellText = undefined;
+
+    for (test_string, 0..) |char, i| {
+        test_glyphs[i] = self.font_system.makeCellText(
+            char,
+            @intCast(i), // col
+            0, // row
+            .{ 255, 255, 255, 255 }, // white text
+        );
+    }
+
+    self.num_test_glyphs = test_string.len;
+    try self.glyphs_buffer.sync(&test_glyphs);
+
+    log.info("Font size update completed successfully", .{});
 }

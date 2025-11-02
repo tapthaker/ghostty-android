@@ -266,6 +266,34 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetTerminalSiz
     // This will be implemented when we integrate with libghostty-vt
 }
 
+/// Set font size and rebuild font atlas
+/// Java signature: void nativeSetFontSize(int fontSize)
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetFontSize(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    font_size: c.jint,
+) void {
+    _ = env;
+    _ = obj;
+
+    log.info("nativeSetFontSize: {d}px", .{font_size});
+
+    if (!renderer_state.initialized) {
+        log.warn("Attempted to set font size before renderer initialized", .{});
+        return;
+    }
+
+    if (renderer_state.renderer) |*renderer| {
+        renderer.updateFontSize(@intCast(font_size)) catch |err| {
+            log.err("Failed to update font size: {}", .{err});
+            return;
+        };
+        log.info("Font size updated successfully to {d}px", .{font_size});
+    } else {
+        log.warn("Renderer not initialized", .{});
+    }
+}
+
 // Comptime test to ensure JNI function names are correct
 comptime {
     // This will cause a compile error if the function signatures don't match
@@ -275,4 +303,5 @@ comptime {
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnDrawFrame;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeDestroy;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetTerminalSize;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetFontSize;
 }

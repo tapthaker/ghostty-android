@@ -25,9 +25,8 @@ pub const FontSystem = struct {
     cell_height: u32,
     baseline: i32,
 
-    /// Simple atlas layout: Fixed grid for ASCII characters
-    /// Each character gets a 32x32 pixel slot
-    const GLYPH_SIZE = 32;
+    /// Dynamic atlas layout based on font size
+    glyph_size: u32, // Calculated based on font size
     const ATLAS_COLS = 16; // 16 characters per row
 
     pub fn init(allocator: std.mem.Allocator, font_size_px: u32) !FontSystem {
@@ -65,7 +64,12 @@ pub const FontSystem = struct {
         const cell_height = font_size_px;
         const baseline = @as(i32, @intCast(glyph.*.bitmap_top));
 
-        log.info("Font metrics: cell={d}x{d}, baseline={d}", .{ cell_width, cell_height, baseline });
+        // Calculate glyph size: 1.5x font size, rounded up to power of 2 for better texture performance
+        const glyph_size_calc = (font_size_px * 3) / 2;
+        var glyph_size: u32 = 16; // Minimum size
+        while (glyph_size < glyph_size_calc) : (glyph_size *= 2) {}
+
+        log.info("Font metrics: cell={d}x{d}, baseline={d}, glyph_size={d}", .{ cell_width, cell_height, baseline, glyph_size });
 
         return FontSystem{
             .allocator = allocator,
@@ -74,6 +78,7 @@ pub const FontSystem = struct {
             .cell_width = cell_width,
             .cell_height = cell_height,
             .baseline = baseline,
+            .glyph_size = glyph_size,
         };
     }
 
@@ -120,7 +125,6 @@ pub const FontSystem = struct {
 
     /// Get atlas position for a character (simple grid layout)
     fn getAtlasPos(self: FontSystem, char: u8) [2]u32 {
-        _ = self;
         if (char < 32 or char > 126) return .{ 0, 0 };
 
         const index = char - 32; // Offset to start at 0
@@ -128,8 +132,8 @@ pub const FontSystem = struct {
         const row = index / ATLAS_COLS;
 
         // Cast to u32 before multiplication to prevent u8 overflow
-        const pos_x: u32 = @as(u32, col) * GLYPH_SIZE;
-        const pos_y: u32 = @as(u32, row) * GLYPH_SIZE;
+        const pos_x: u32 = @as(u32, col) * self.glyph_size;
+        const pos_y: u32 = @as(u32, row) * self.glyph_size;
 
         return .{ pos_x, pos_y };
     }
@@ -155,9 +159,16 @@ pub const FontSystem = struct {
         const bmp_height = bitmap.rows;
         const bmp_buffer = bitmap.buffer orelse return; // Empty glyph (space, etc.)
 
-        // Calculate position with centering
-        const x_offset = (GLYPH_SIZE - bmp_width) / 2;
-        const y_offset = (GLYPH_SIZE - bmp_height) / 2;
+        // Calculate position with baseline alignment
+        // Horizontally center the glyph
+        const x_offset = (self.glyph_size - bmp_width) / 2;
+
+        // Vertically align based on baseline
+        // Place baseline at a consistent position within the slot (3/4 down from top)
+        const baseline_pos = (self.glyph_size * 3) / 4;
+        const bitmap_top = glyph.*.bitmap_top;
+        // y_offset positions the top of the bitmap relative to the slot top
+        const y_offset = baseline_pos - @as(u32, @intCast(bitmap_top));
 
         // Copy bitmap data to atlas
         var y: u32 = 0;
@@ -190,12 +201,25 @@ pub const FontSystem = struct {
 
         return shaders.CellText{
             .glyph_pos = atlas_pos,
-            .glyph_size = .{ GLYPH_SIZE, GLYPH_SIZE },
+            .glyph_size = .{ self.glyph_size, self.glyph_size },
             .bearings = .{ 0, 0 }, // Simplified for Phase 1
             .grid_pos = .{ grid_col, grid_row },
             .color = color,
             .atlas = .grayscale,
             .bools = .{},
         };
+    }
+
+    /// Calculate required atlas dimensions for the font size
+    /// Returns [width, height] in pixels
+    pub fn getAtlasDimensions(self: FontSystem) [2]u32 {
+        // ASCII printable chars: 32-126 = 95 characters
+        const num_chars = 95;
+        const num_rows = (num_chars + ATLAS_COLS - 1) / ATLAS_COLS; // Ceiling division
+
+        const width = ATLAS_COLS * self.glyph_size;
+        const height = num_rows * self.glyph_size;
+
+        return .{ width, height };
     }
 };
