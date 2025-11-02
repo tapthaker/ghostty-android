@@ -29,6 +29,12 @@ uniforms: shaders.Uniforms,
 /// Background color rendering pipeline
 bg_color_pipeline: Pipeline,
 
+/// Cell backgrounds SSBO (binding point 1) - holds per-cell background colors
+cells_bg_buffer: Buffer(u32),
+
+/// Cell backgrounds rendering pipeline
+cell_bg_pipeline: Pipeline,
+
 /// Initialize the renderer
 pub fn init(allocator: std.mem.Allocator) !Self {
     log.info("Initializing renderer", .{});
@@ -45,6 +51,18 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     });
     errdefer bg_color_pipeline.deinit();
 
+    // Load and compile cell_bg shaders
+    const cell_bg_vertex_src = shader_module.loadShaderCode("shaders/glsl/full_screen.v.glsl");
+    const cell_bg_fragment_src = shader_module.loadShaderCode("shaders/glsl/cell_bg.f.glsl");
+
+    // Create cell backgrounds pipeline (also uses full-screen triangle)
+    const cell_bg_pipeline = try Pipeline.init(null, .{
+        .vertex_src = cell_bg_vertex_src,
+        .fragment_src = cell_bg_fragment_src,
+        .blending_enabled = true, // Blend over bg_color
+    });
+    errdefer cell_bg_pipeline.deinit();
+
     // Create uniforms buffer
     var uniforms_buffer = try Buffer(shaders.Uniforms).init(.{
         .target = .uniform,
@@ -52,8 +70,47 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     }, 1);
     errdefer uniforms_buffer.deinit();
 
-    // Bind uniforms buffer to binding point 1 (matches shader layout)
-    uniforms_buffer.bindBase(1);
+    // Bind uniforms buffer to binding point 0 (matches shader layout)
+    // Note: We use binding 0 for UBO since binding 1 is used for SSBO
+    uniforms_buffer.bindBase(0);
+
+    // Create cell backgrounds SSBO
+    // For testing: 80x24 grid = 1920 cells
+    const grid_cols: u32 = 80;
+    const grid_rows: u32 = 24;
+    const num_cells = grid_cols * grid_rows;
+
+    var cells_bg_buffer = try Buffer(u32).init(.{
+        .target = .shader_storage,
+        .usage = .dynamic_draw,
+    }, num_cells);
+    errdefer cells_bg_buffer.deinit();
+
+    // Initialize test data (checkerboard pattern)
+    var cell_colors = try allocator.alloc(u32, num_cells);
+    defer allocator.free(cell_colors);
+
+    for (0..grid_rows) |row| {
+        for (0..grid_cols) |col| {
+            const idx = row * grid_cols + col;
+
+            // Create checkerboard: alternate between red and green
+            const is_dark = (row + col) % 2 == 0;
+            if (is_dark) {
+                // Dark red (128, 0, 0, 255)
+                cell_colors[idx] = shaders.Uniforms.pack4u8(128, 0, 0, 255);
+            } else {
+                // Dark green (0, 128, 0, 255)
+                cell_colors[idx] = shaders.Uniforms.pack4u8(0, 128, 0, 255);
+            }
+        }
+    }
+
+    // Upload test data to GPU
+    try cells_bg_buffer.sync(cell_colors);
+
+    // Bind SSBO to binding point 1 (matches shader layout)
+    cells_bg_buffer.bindBase(1);
 
     // Initialize default uniforms
     const uniforms = shaders.Uniforms{
@@ -82,11 +139,15 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .uniforms_buffer = uniforms_buffer,
         .uniforms = uniforms,
         .bg_color_pipeline = bg_color_pipeline,
+        .cells_bg_buffer = cells_bg_buffer,
+        .cell_bg_pipeline = cell_bg_pipeline,
     };
 }
 
 pub fn deinit(self: *Self) void {
     log.info("Destroying renderer", .{});
+    self.cell_bg_pipeline.deinit();
+    self.cells_bg_buffer.deinit();
     self.bg_color_pipeline.deinit();
     self.uniforms_buffer.deinit();
 }
@@ -130,6 +191,10 @@ pub fn render(self: *Self) !void {
 
     // Render background color using full-screen triangle
     self.bg_color_pipeline.use();
+    gl.drawArrays(gl.GL_TRIANGLES, 0, 3); // Draw 3 vertices for full-screen triangle
+
+    // Render cell backgrounds (blended over bg_color)
+    self.cell_bg_pipeline.use();
     gl.drawArrays(gl.GL_TRIANGLES, 0, 3); // Draw 3 vertices for full-screen triangle
 
     // Check for errors

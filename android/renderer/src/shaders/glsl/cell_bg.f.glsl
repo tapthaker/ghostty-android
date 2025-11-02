@@ -6,7 +6,7 @@
 // Must declare this output for some versions of OpenGL.
 layout(location = 0) out vec4 out_FragColor;
 
-layout(binding = 1, std430) readonly buffer bg_cells {
+layout(binding = 1, std430) buffer bg_cells {
     uint cells[];
 };
 
