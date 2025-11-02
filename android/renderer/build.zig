@@ -10,18 +10,18 @@ pub fn build(b: *std.Build) void {
         std.log.warn("Warning: Target should be Android (e.g., aarch64-linux-android)", .{});
     }
 
-    // Create a module for the renderer
-    const mod = b.createModule(.{
+    // Create a module for the library
+    const lib_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    // Create the shared library for Android with the module
+    // Create the shared library for Android
     const lib = b.addLibrary(.{
         .name = "ghostty_renderer",
+        .root_module = lib_mod,
         .linkage = .dynamic,
-        .root_module = mod,
     });
 
     // Link libc (required for JNI)
@@ -39,9 +39,15 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(lib);
 
     // Create a test step (for future unit tests)
-    // Use the same module for tests
+    const test_mod = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const lib_unit_tests = b.addTest(.{
-        .root_module = mod,
+        .name = "renderer_tests",
+        .root_module = test_mod,
     });
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
