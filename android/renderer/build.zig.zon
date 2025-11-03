@@ -6,5 +6,6 @@
     .minimum_zig_version = "0.15.2",
     .dependencies = .{
         .freetype = .{ .path = "../../libghostty-vt/pkg/freetype" },
+        .@"ghostty-vt" = .{ .path = "../../libghostty-vt" },
     },
 }

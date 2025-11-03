@@ -19,6 +19,12 @@ pub fn build(b: *std.Build) void {
         .@"enable-libpng" = false,
     });
 
+    // Get libghostty-vt dependency
+    const vt_dep = b.dependency("ghostty-vt", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Create a module for the library
     const lib_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -28,6 +34,9 @@ pub fn build(b: *std.Build) void {
 
     // Add FreeType module
     lib_mod.addImport("freetype", freetype_dep.module("freetype"));
+
+    // Add libghostty-vt module (using the Zig module, not C ABI)
+    lib_mod.addImport("ghostty-vt", vt_dep.module("ghostty-vt"));
 
     // Create the shared library for Android
     const lib = b.addLibrary(.{

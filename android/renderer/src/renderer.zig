@@ -10,6 +10,8 @@ const Texture = @import("texture.zig");
 const shaders = @import("shaders.zig");
 const shader_module = @import("shader.zig");
 const FontSystem = @import("font_system.zig").FontSystem;
+const TerminalManager = @import("terminal_manager.zig");
+const screen_extractor = @import("screen_extractor.zig");
 
 const log = std.log.scoped(.renderer);
 
@@ -21,9 +23,16 @@ allocator: std.mem.Allocator,
 /// Font system for text rendering
 font_system: FontSystem,
 
+/// Terminal manager for VT processing
+terminal_manager: TerminalManager,
+
 /// Surface dimensions in pixels
 width: u32 = 0,
 height: u32 = 0,
+
+/// Grid dimensions (terminal columns x rows)
+grid_cols: u16 = 80,
+grid_rows: u16 = 24,
 
 /// Global uniforms buffer (UBO at binding point 1)
 uniforms_buffer: Buffer(shaders.Uniforms),
@@ -141,6 +150,19 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     log.info("Font system initialized", .{});
 
+    // Initialize terminal manager
+    var terminal_manager = try TerminalManager.init(allocator, @intCast(grid_cols), @intCast(grid_rows));
+    errdefer terminal_manager.deinit();
+
+    log.info("Terminal manager initialized ({d}x{d})", .{ grid_cols, grid_rows });
+
+    // Feed some test ANSI sequences to the terminal
+    try terminal_manager.processInput("\x1b[32mGreen Text!\x1b[0m\r\n");
+    try terminal_manager.processInput("\x1b[31mRed Text!\x1b[0m\r\n");
+    try terminal_manager.processInput("Normal text line\r\n");
+
+    log.info("Test ANSI sequences processed", .{});
+
     // Get dynamic atlas dimensions based on font size
     const font_atlas_dims = font_system.getAtlasDimensions();
     const atlas_width: u32 = font_atlas_dims[0];
@@ -238,38 +260,9 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     // Note: We leave the program bound after setting uniforms
     // The uniforms are part of the program state and will persist
 
-    // Generate test text: "Hello World!"
-    const test_text = "Hello World!";
-    var text_glyphs = try allocator.alloc(shaders.CellText, test_text.len);
-    defer allocator.free(text_glyphs);
-
-    for (test_text, 0..) |char, i| {
-        text_glyphs[i] = font_system.makeCellText(
-            char,
-            @intCast(i), // Column
-            5, // Row 5
-            .{ 255, 255, 255, 255 }, // White text
-        );
-    }
-
-    // Upload text glyphs to GPU
-    try glyphs_buffer.sync(text_glyphs);
-    const num_test_glyphs: u32 = @intCast(text_glyphs.len);
-    log.info("Uploaded {} text glyphs to GPU: \"{s}\"", .{ num_test_glyphs, test_text });
-
-    // Log all glyphs for debugging
-    for (text_glyphs, 0..) |glyph, i| {
-        log.info("Glyph {}: '{c}' grid=({},{}), atlas=({},{}), size=({},{})", .{
-            i,
-            test_text[i],
-            glyph.grid_pos[0],
-            glyph.grid_pos[1],
-            glyph.glyph_pos[0],
-            glyph.glyph_pos[1],
-            glyph.glyph_size[0],
-            glyph.glyph_size[1],
-        });
-    }
+    // Extract terminal state and sync to GPU
+    // (This will be done in a temporary renderer-like struct before full init)
+    var num_test_glyphs: u32 = 0;
 
     // Initialize default uniforms
     const uniforms = shaders.Uniforms{
@@ -280,7 +273,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .grid_padding = .{ 0.0, 0.0, 0.0, 0.0 },
         .padding_extend = .{},
         .min_contrast = 1.0,
-        .cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(0, 0),
+        .cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(255, 255), // Off-screen to avoid color override
         .cursor_color_packed_4u8 = shaders.Uniforms.pack4u8(255, 255, 255, 255), // White
         .bg_color_packed_4u8 = shaders.Uniforms.pack4u8(40, 20, 60, 255), // Purple (for testing)
         .bools = .{
@@ -293,11 +286,72 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     log.info("Cell size from font: {d}x{d}", .{ uniforms.cell_size[0], uniforms.cell_size[1] });
 
+    // Extract terminal state and sync to GPU
+    log.info("Extracting terminal state...", .{});
+    const cells = try screen_extractor.extractCells(allocator, terminal_manager.getTerminal());
+    defer screen_extractor.freeCells(allocator, cells);
+
+    log.info("Extracted {} cells from terminal", .{cells.len});
+
+    // Convert terminal cells to GPU format
+    var text_glyphs = try std.ArrayList(shaders.CellText).initCapacity(allocator, cells.len);
+    defer text_glyphs.deinit(allocator);
+
+    for (cells) |cell| {
+        // Only add renderable glyphs (skip default spaces)
+        if (cell.codepoint != ' ' or cell.fg_color[0] != 255 or cell.fg_color[1] != 255 or cell.fg_color[2] != 255) {
+            try text_glyphs.append(allocator, font_system.makeCellText(
+                @intCast(cell.codepoint),
+                cell.col,
+                cell.row,
+                cell.fg_color,
+            ));
+        }
+    }
+
+    // Debug: Log first few glyphs being uploaded to GPU
+    for (text_glyphs.items, 0..) |glyph, i| {
+        if (i < 5) {
+            log.info("GPU glyph[{d}] at grid({d},{d}): color=({d},{d},{d})", .{
+                i,
+                glyph.grid_pos[0],
+                glyph.grid_pos[1],
+                glyph.color[0],
+                glyph.color[1],
+                glyph.color[2],
+            });
+        }
+    }
+
+    // Upload to GPU
+    try glyphs_buffer.sync(text_glyphs.items);
+    num_test_glyphs = @intCast(text_glyphs.items.len);
+    log.info("Synced {} glyphs to GPU from terminal", .{num_test_glyphs});
+
+    // Also sync background colors
+    var cell_bg_colors = try allocator.alloc(u32, num_cells);
+    defer allocator.free(cell_bg_colors);
+    @memset(cell_bg_colors, 0);
+
+    for (cells) |cell| {
+        const idx: usize = @as(usize, cell.row) * @as(usize, grid_cols) + @as(usize, cell.col);
+        cell_bg_colors[idx] = shaders.Uniforms.pack4u8(
+            cell.bg_color[0],
+            cell.bg_color[1],
+            cell.bg_color[2],
+            cell.bg_color[3],
+        );
+    }
+    try cells_bg_buffer.sync(cell_bg_colors);
+
     log.info("Renderer initialized successfully", .{});
 
     return .{
         .allocator = allocator,
         .font_system = font_system,
+        .terminal_manager = terminal_manager,
+        .grid_cols = @intCast(grid_cols),
+        .grid_rows = @intCast(grid_rows),
         .uniforms_buffer = uniforms_buffer,
         .uniforms = uniforms,
         .bg_color_pipeline = bg_color_pipeline,
@@ -323,6 +377,7 @@ pub fn deinit(self: *Self) void {
     self.cells_bg_buffer.deinit();
     self.bg_color_pipeline.deinit();
     self.uniforms_buffer.deinit();
+    self.terminal_manager.deinit();
     self.font_system.deinit();
 }
 
@@ -504,4 +559,65 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
     try self.glyphs_buffer.sync(&test_glyphs);
 
     log.info("Font size update completed successfully", .{});
+}
+
+/// Update renderer buffers from terminal state
+pub fn syncFromTerminal(self: *Self) !void {
+    log.debug("Syncing renderer from terminal state", .{});
+
+    // Extract cell data from terminal
+    const cells = try screen_extractor.extractCells(
+        self.allocator,
+        self.terminal_manager.getTerminal(),
+    );
+    defer screen_extractor.freeCells(self.allocator, cells);
+
+    log.debug("Extracted {} cells from terminal", .{cells.len});
+
+    // Allocate temp buffers for GPU data
+    const num_cells: usize = @intCast(self.grid_cols * self.grid_rows);
+    var cell_bg_colors = try self.allocator.alloc(u32, num_cells);
+    defer self.allocator.free(cell_bg_colors);
+
+    var text_glyphs = try std.ArrayList(shaders.CellText).initCapacity(self.allocator, num_cells);
+    defer text_glyphs.deinit();
+
+    // Clear all backgrounds to default
+    @memset(cell_bg_colors, 0);
+
+    // Process each cell
+    for (cells) |cell| {
+        const idx: usize = @as(usize, cell.row) * @as(usize, self.grid_cols) + @as(usize, cell.col);
+
+        // Pack background color (RGBA8)
+        cell_bg_colors[idx] = shaders.Uniforms.pack4u8(
+            cell.bg_color[0],
+            cell.bg_color[1],
+            cell.bg_color[2],
+            cell.bg_color[3],
+        );
+
+        // Only add renderable glyphs (skip spaces with default colors)
+        if (cell.codepoint != ' ' or cell.fg_color[0] != 255 or cell.fg_color[1] != 255 or cell.fg_color[2] != 255) {
+            try text_glyphs.append(self.font_system.makeCellText(
+                @intCast(cell.codepoint),
+                cell.col,
+                cell.row,
+                cell.fg_color,
+            ));
+        }
+    }
+
+    // Upload to GPU
+    try self.cells_bg_buffer.sync(cell_bg_colors);
+    try self.glyphs_buffer.sync(text_glyphs.items);
+    self.num_test_glyphs = @intCast(text_glyphs.items.len);
+
+    log.info("Synced {} glyphs to GPU from terminal", .{self.num_test_glyphs});
+}
+
+/// Process VT input and sync to renderer
+pub fn processTerminalInput(self: *Self, data: []const u8) !void {
+    try self.terminal_manager.processInput(data);
+    try self.syncFromTerminal();
 }
