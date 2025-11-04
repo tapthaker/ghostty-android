@@ -24,6 +24,9 @@ pub fn init(allocator: Allocator, cols: u16, rows: u16) !TerminalManager {
     const terminal = try ghostty_vt.Terminal.init(allocator, .{
         .cols = @intCast(cols),
         .rows = @intCast(rows),
+        .default_modes = .{
+            .linefeed = true, // LNM mode: make \n act as \r\n (newline with carriage return)
+        },
     });
 
     return .{
