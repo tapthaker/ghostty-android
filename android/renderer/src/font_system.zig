@@ -29,6 +29,11 @@ pub const FontSystem = struct {
     glyph_size: u32, // Calculated based on font size
     const ATLAS_COLS = 16; // 16 characters per row
 
+    /// Common Unicode characters beyond ASCII (for terminal emulation)
+    const UNICODE_CHARS = [_]u21{
+        0x2588, // █ Full block (used in 256 color tests, progress bars, etc.)
+    };
+
     pub fn init(allocator: std.mem.Allocator, font_size_px: u32) !FontSystem {
         log.info("Initializing font system with size {d}px", .{font_size_px});
 
@@ -96,13 +101,13 @@ pub const FontSystem = struct {
         };
     }
 
-    /// Render ASCII characters into atlas and return atlas data
+    /// Render ASCII and common Unicode characters into atlas and return atlas data
     pub fn populateAtlas(
         self: *FontSystem,
         atlas_width: u32,
         atlas_height: u32,
     ) ![]u8 {
-        log.info("Populating atlas ({d}x{d}) with ASCII characters", .{ atlas_width, atlas_height });
+        log.info("Populating atlas ({d}x{d}) with characters", .{ atlas_width, atlas_height });
 
         // Allocate atlas buffer (R8 format = 1 byte per pixel)
         const atlas_data = try self.allocator.alloc(u8, atlas_width * atlas_height);
@@ -118,32 +123,53 @@ pub const FontSystem = struct {
             try self.renderGlyphToAtlas(char, atlas_pos, atlas_data, atlas_width, atlas_height);
         }
 
-        log.info("Atlas populated with {d} characters", .{127 - 32});
+        // Render common Unicode characters
+        for (UNICODE_CHARS) |unicode_char| {
+            const atlas_pos = self.getAtlasPos(unicode_char);
+            try self.renderGlyphToAtlasUnicode(unicode_char, atlas_pos, atlas_data, atlas_width, atlas_height);
+        }
+
+        log.info("Atlas populated with {d} ASCII + {d} Unicode characters", .{ 127 - 32, UNICODE_CHARS.len });
 
         return atlas_data;
     }
 
     /// Get atlas position for a character (simple grid layout)
-    /// For Phase 1, only ASCII 32-126 are supported. Out-of-range chars use space (32).
+    /// Supports ASCII 32-126 and common Unicode characters. Out-of-range chars use space (32).
     fn getAtlasPos(self: FontSystem, codepoint: u21) [2]u32 {
-        // Clamp to ASCII printable range for Phase 1
-        const char: u8 = if (codepoint >= 32 and codepoint <= 126)
-            @intCast(codepoint)
-        else
-            32; // Use space for unsupported characters
+        var index: u32 = 0;
 
-        const index = char - 32; // Offset to start at 0
+        // Check if it's printable ASCII (32-126)
+        if (codepoint >= 32 and codepoint <= 126) {
+            index = codepoint - 32; // Offset to start at 0
+        } else {
+            // Check if it's a supported Unicode character
+            var found = false;
+            for (UNICODE_CHARS, 0..) |unicode_char, i| {
+                if (codepoint == unicode_char) {
+                    // Place Unicode chars after ASCII (95 ASCII chars from 32-126)
+                    index = 95 + @as(u32, @intCast(i));
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                // Use space for unsupported characters
+                index = 0; // Space is at index 0 (codepoint 32 - 32 = 0)
+            }
+        }
+
         const col = index % ATLAS_COLS;
         const row = index / ATLAS_COLS;
 
-        // Cast to u32 before multiplication to prevent u8 overflow
-        const pos_x: u32 = @as(u32, col) * self.glyph_size;
-        const pos_y: u32 = @as(u32, row) * self.glyph_size;
+        // Cast to u32 before multiplication to prevent overflow
+        const pos_x: u32 = col * self.glyph_size;
+        const pos_y: u32 = row * self.glyph_size;
 
         return .{ pos_x, pos_y };
     }
 
-    /// Render a single glyph into the atlas at the specified position
+    /// Render a single ASCII glyph into the atlas at the specified position
     fn renderGlyphToAtlas(
         self: *FontSystem,
         char: u8,
@@ -194,8 +220,59 @@ pub const FontSystem = struct {
         }
     }
 
+    /// Render a single Unicode glyph into the atlas at the specified position
+    fn renderGlyphToAtlasUnicode(
+        self: *FontSystem,
+        codepoint: u21,
+        atlas_pos: [2]u32,
+        atlas_data: []u8,
+        atlas_width: u32,
+        atlas_height: u32,
+    ) !void {
+        // Load and render glyph
+        const glyph_index = self.face.getCharIndex(codepoint) orelse return; // Skip if glyph doesn't exist
+        try self.face.loadGlyph(glyph_index, .{ .render = true });
+        try self.face.renderGlyph(.normal);
+        const glyph = self.face.handle.*.glyph;
+        const bitmap = glyph.*.bitmap;
+
+        // Get bitmap dimensions
+        const bmp_width = bitmap.width;
+        const bmp_height = bitmap.rows;
+        const bmp_buffer = bitmap.buffer orelse return; // Empty glyph (space, etc.)
+
+        // Calculate position with baseline alignment
+        // Horizontally center the glyph
+        const x_offset = (self.glyph_size - bmp_width) / 2;
+
+        // Vertically align based on baseline
+        // Place baseline at a consistent position within the slot (3/4 down from top)
+        const baseline_pos = (self.glyph_size * 3) / 4;
+        const bitmap_top = glyph.*.bitmap_top;
+        // y_offset positions the top of the bitmap relative to the slot top
+        const y_offset = baseline_pos - @as(u32, @intCast(bitmap_top));
+
+        // Copy bitmap data to atlas
+        var y: u32 = 0;
+        while (y < bmp_height) : (y += 1) {
+            const atlas_y = atlas_pos[1] + y_offset + y;
+            if (atlas_y >= atlas_height) break;
+
+            var x: u32 = 0;
+            while (x < bmp_width) : (x += 1) {
+                const atlas_x = atlas_pos[0] + x_offset + x;
+                if (atlas_x >= atlas_width) break;
+
+                const atlas_index = atlas_y * atlas_width + atlas_x;
+                const bmp_index = y * bmp_width + x;
+
+                atlas_data[atlas_index] = bmp_buffer[bmp_index];
+            }
+        }
+    }
+
     /// Generate CellText instance for rendering a character at a grid position
-    /// For Phase 1, supports ASCII 32-126. Out-of-range codepoints render as space.
+    /// Supports ASCII 32-126 and common Unicode characters. Out-of-range codepoints render as space.
     pub fn makeCellText(
         self: FontSystem,
         codepoint: u21,
@@ -219,12 +296,12 @@ pub const FontSystem = struct {
     /// Calculate required atlas dimensions for the font size
     /// Returns [width, height] in pixels
     pub fn getAtlasDimensions(self: FontSystem) [2]u32 {
-        // ASCII printable chars: 32-126 = 95 characters
-        const num_chars = 95;
-        const num_rows = (num_chars + ATLAS_COLS - 1) / ATLAS_COLS; // Ceiling division
+        // ASCII printable chars: 32-126 = 95 characters + Unicode chars
+        const num_chars: u32 = 95 + @as(u32, @intCast(UNICODE_CHARS.len));
+        const num_rows: u32 = (num_chars + ATLAS_COLS - 1) / ATLAS_COLS; // Ceiling division
 
-        const width = ATLAS_COLS * self.glyph_size;
-        const height = num_rows * self.glyph_size;
+        const width: u32 = ATLAS_COLS * self.glyph_size;
+        const height: u32 = num_rows * self.glyph_size;
 
         return .{ width, height };
     }
