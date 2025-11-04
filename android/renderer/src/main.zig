@@ -294,6 +294,44 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetFontSize(
     }
 }
 
+/// Process ANSI input (inject ANSI escape sequences into the VT emulator)
+/// Java signature: void nativeProcessInput(String ansiSequence)
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeProcessInput(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    ansiSequence: c.jstring,
+) void {
+    _ = obj;
+
+    log.info("nativeProcessInput called", .{});
+
+    if (!renderer_state.initialized) {
+        log.warn("Attempted to process input before renderer initialized", .{});
+        return;
+    }
+
+    if (renderer_state.renderer) |*renderer| {
+        // Convert JNI string to Zig string
+        var buffer: [8192]u8 = undefined;
+        const input_data = jni.getJString(env, ansiSequence, &buffer) catch |err| {
+            log.err("Failed to get JNI string: {}", .{err});
+            return;
+        };
+
+        log.debug("Processing {} bytes of ANSI input", .{input_data.len});
+
+        // Feed the input to the terminal manager
+        renderer.terminal_manager.processInput(input_data) catch |err| {
+            log.err("Failed to process input: {}", .{err});
+            return;
+        };
+
+        log.debug("Input processed successfully", .{});
+    } else {
+        log.warn("Renderer not initialized", .{});
+    }
+}
+
 // Comptime test to ensure JNI function names are correct
 comptime {
     // This will cause a compile error if the function signatures don't match

@@ -125,6 +125,18 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     }
 
     /**
+     * Get the renderer instance.
+     *
+     * This allows access to the renderer for direct operations like
+     * processing input for testing.
+     *
+     * @return The GhosttyRenderer instance
+     */
+    fun getRenderer(): GhosttyRenderer {
+        return renderer
+    }
+
+    /**
      * Called when the view is detached from the window.
      *
      * Clean up resources here.

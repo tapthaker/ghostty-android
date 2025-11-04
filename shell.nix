@@ -54,6 +54,7 @@ pkgs.mkShell {
   ];
 
   shellHook = ''
+    # Switch to zsh
     # Set JAVA_HOME for Gradle
     export JAVA_HOME="${pkgs.jdk17}"
 
@@ -81,9 +82,6 @@ pkgs.mkShell {
     echo "  make build-native  - Build libghostty for all Android targets"
     echo "  make clean         - Clean build artifacts"
     echo ""
-
-    # Switch to zsh
-    exec zsh
   '';
 
   # Environment variables for Android builds

@@ -156,13 +156,6 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     log.info("Terminal manager initialized ({d}x{d})", .{ grid_cols, grid_rows });
 
-    // Feed some test ANSI sequences to the terminal
-    try terminal_manager.processInput("\x1b[32mGreen Text!\x1b[0m\r\n");
-    try terminal_manager.processInput("\x1b[31mRed Text!\x1b[0m\r\n");
-    try terminal_manager.processInput("Normal text line\r\n");
-
-    log.info("Test ANSI sequences processed", .{});
-
     // Get dynamic atlas dimensions based on font size
     const font_atlas_dims = font_system.getAtlasDimensions();
     const atlas_width: u32 = font_atlas_dims[0];
@@ -262,7 +255,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     // Extract terminal state and sync to GPU
     // (This will be done in a temporary renderer-like struct before full init)
-    var num_test_glyphs: u32 = 0;
+    _ = 0; // Reserved for future test glyph count
 
     // Initialize default uniforms
     const uniforms = shaders.Uniforms{
@@ -286,64 +279,6 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     log.info("Cell size from font: {d}x{d}", .{ uniforms.cell_size[0], uniforms.cell_size[1] });
 
-    // Extract terminal state and sync to GPU
-    log.info("Extracting terminal state...", .{});
-    const cells = try screen_extractor.extractCells(allocator, terminal_manager.getTerminal());
-    defer screen_extractor.freeCells(allocator, cells);
-
-    log.info("Extracted {} cells from terminal", .{cells.len});
-
-    // Convert terminal cells to GPU format
-    var text_glyphs = try std.ArrayList(shaders.CellText).initCapacity(allocator, cells.len);
-    defer text_glyphs.deinit(allocator);
-
-    for (cells) |cell| {
-        // Only add renderable glyphs (skip default spaces)
-        if (cell.codepoint != ' ' or cell.fg_color[0] != 255 or cell.fg_color[1] != 255 or cell.fg_color[2] != 255) {
-            try text_glyphs.append(allocator, font_system.makeCellText(
-                @intCast(cell.codepoint),
-                cell.col,
-                cell.row,
-                cell.fg_color,
-            ));
-        }
-    }
-
-    // Debug: Log first few glyphs being uploaded to GPU
-    for (text_glyphs.items, 0..) |glyph, i| {
-        if (i < 5) {
-            log.info("GPU glyph[{d}] at grid({d},{d}): color=({d},{d},{d})", .{
-                i,
-                glyph.grid_pos[0],
-                glyph.grid_pos[1],
-                glyph.color[0],
-                glyph.color[1],
-                glyph.color[2],
-            });
-        }
-    }
-
-    // Upload to GPU
-    try glyphs_buffer.sync(text_glyphs.items);
-    num_test_glyphs = @intCast(text_glyphs.items.len);
-    log.info("Synced {} glyphs to GPU from terminal", .{num_test_glyphs});
-
-    // Also sync background colors
-    var cell_bg_colors = try allocator.alloc(u32, num_cells);
-    defer allocator.free(cell_bg_colors);
-    @memset(cell_bg_colors, 0);
-
-    for (cells) |cell| {
-        const idx: usize = @as(usize, cell.row) * @as(usize, grid_cols) + @as(usize, cell.col);
-        cell_bg_colors[idx] = shaders.Uniforms.pack4u8(
-            cell.bg_color[0],
-            cell.bg_color[1],
-            cell.bg_color[2],
-            cell.bg_color[3],
-        );
-    }
-    try cells_bg_buffer.sync(cell_bg_colors);
-
     log.info("Renderer initialized successfully", .{});
 
     return .{
@@ -362,7 +297,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .atlas_dims_buffer = atlas_dims_buffer,
         .glyphs_buffer = glyphs_buffer,
         .cell_text_pipeline = cell_text_pipeline,
-        .num_test_glyphs = num_test_glyphs,
+        .num_test_glyphs = 0,
     };
 }
 
@@ -413,6 +348,9 @@ fn syncUniforms(self: *Self) !void {
 
 /// Render a frame
 pub fn render(self: *Self) !void {
+    // Sync renderer state from terminal (extract cells and update GPU buffers)
+    try self.syncFromTerminal();
+
     // Clear with transparent black (will be overwritten by bg_color shader)
     gl.clearColor(0.0, 0.0, 0.0, 0.0);
     gl.clear(gl.GL_COLOR_BUFFER_BIT);
@@ -580,7 +518,7 @@ pub fn syncFromTerminal(self: *Self) !void {
     defer self.allocator.free(cell_bg_colors);
 
     var text_glyphs = try std.ArrayList(shaders.CellText).initCapacity(self.allocator, num_cells);
-    defer text_glyphs.deinit();
+    defer text_glyphs.deinit(self.allocator);
 
     // Clear all backgrounds to default
     @memset(cell_bg_colors, 0);
@@ -599,7 +537,7 @@ pub fn syncFromTerminal(self: *Self) !void {
 
         // Only add renderable glyphs (skip spaces with default colors)
         if (cell.codepoint != ' ' or cell.fg_color[0] != 255 or cell.fg_color[1] != 255 or cell.fg_color[2] != 255) {
-            try text_glyphs.append(self.font_system.makeCellText(
+            try text_glyphs.append(self.allocator, self.font_system.makeCellText(
                 @intCast(cell.codepoint),
                 cell.col,
                 cell.row,

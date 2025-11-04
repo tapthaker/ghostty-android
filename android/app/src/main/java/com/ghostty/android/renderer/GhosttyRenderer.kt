@@ -36,6 +36,7 @@ class GhosttyRenderer : GLSurfaceView.Renderer {
     private external fun nativeDestroy()
     private external fun nativeSetTerminalSize(cols: Int, rows: Int)
     private external fun nativeSetFontSize(fontSize: Int)
+    private external fun nativeProcessInput(ansiSequence: String)
 
     /**
      * Called when the OpenGL surface is created.
@@ -156,6 +157,24 @@ class GhosttyRenderer : GLSurfaceView.Renderer {
             nativeSetFontSize(fontSize)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeSetFontSize", e)
+        }
+    }
+
+    /**
+     * Process ANSI input (inject ANSI escape sequences into the VT emulator).
+     *
+     * This feeds the input directly to the terminal manager, bypassing the shell.
+     * Useful for testing and direct terminal manipulation.
+     *
+     * @param ansiSequence The ANSI escape sequence string to process
+     */
+    fun processInput(ansiSequence: String) {
+        Log.d(TAG, "processInput: ${ansiSequence.length} bytes")
+
+        try {
+            nativeProcessInput(ansiSequence)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeProcessInput", e)
         }
     }
 }
