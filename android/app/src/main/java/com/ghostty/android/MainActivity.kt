@@ -26,7 +26,6 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var ghosttyBridge: GhosttyBridge
     private lateinit var terminalSession: TerminalSession
-    private var testRunner: TestRunner? = null
     private var glSurfaceView: GhosttyGLSurfaceView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,49 +38,38 @@ class MainActivity : ComponentActivity() {
         ghosttyBridge = GhosttyBridge.getInstance()
         // TODO: Enable when JNI key encoder is implemented
         // ghosttyBridge.createKeyEncoder()
-
         // Create terminal session
         terminalSession = TerminalSession()
-
         // TestRunner will be created when GL surface view is initialized
+        var testId = intent.getStringExtra("TEST_ID")
+        if (testId == null) {
+            testId = "basic_colors_fg"
+        }
+
+        android.util.Log.i("MainActivity", "onCreate: testId=$testId")
 
         enableEdgeToEdge()
 
         setContent {
-            GhosttyTheme {
-                var testMode by remember { mutableStateOf(false) }
+            // Use remember and mutableStateOf so the Composable recomposes when testRunner is initialized
+            val testRunnerState = remember { mutableStateOf<TestRunner?>(null) }
 
-                if (testMode) {
+            GhosttyTheme {
                     TestModeScreen(
-                        testRunner = testRunner,
-                        onExitTestMode = { testMode = false },
+                        testRunner = testRunnerState.value,
+                        onExitTestMode = {},
                         onGLSurfaceViewCreated = { view ->
                             glSurfaceView = view
                             // Initialize test runner with the renderer from the GL surface view
-                            if (testRunner == null) {
-                                testRunner = TestRunner(view.getRenderer())
+                            if (testRunnerState.value == null) {
+                                testRunnerState.value = TestRunner(view.getRenderer(), applicationContext)
                             }
-                        }
-                    )
-                } else {
-                    TerminalScreen(
-                        session = terminalSession,
-                        onKeyPress = { key ->
-                            terminalSession.writeInput(key)
                         },
-                        onEnterTestMode = { testMode = true },
-                        onGLSurfaceViewCreated = { view ->
-                            glSurfaceView = view
-                            // Initialize test runner with the renderer from the GL surface view
-                            if (testRunner == null) {
-                                testRunner = TestRunner(view.getRenderer())
-                            }
-                        }
+                        testId = testId,
                     )
                 }
             }
         }
-    }
 
     override fun onPause() {
         super.onPause()
@@ -158,11 +146,26 @@ fun TerminalScreen(
 fun TestModeScreen(
     testRunner: TestRunner?,
     onExitTestMode: () -> Unit,
-    onGLSurfaceViewCreated: (GhosttyGLSurfaceView) -> Unit
+    onGLSurfaceViewCreated: (GhosttyGLSurfaceView) -> Unit,
+    testId: String?,
+    onTestsStarted: () -> Unit = {}
 ) {
+    android.util.Log.i("TestModeScreen", "Compose: testRunner=$testRunner, testId=$testId")
+
     val isRunning by testRunner?.isRunning?.collectAsState() ?: remember { mutableStateOf(false) }
     val testResults by testRunner?.testResults?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     val currentTest by testRunner?.currentTest?.collectAsState() ?: remember { mutableStateOf(null) }
+
+    // Auto-start tests when both testRunner and testId are available
+    if (testRunner != null && testId != null) {
+        LaunchedEffect(testId, testRunner) {
+            android.util.Log.i("TestModeScreen", "LaunchedEffect: starting test testId=$testId")
+            testRunner.runTestById(testId)
+            onTestsStarted()
+        }
+    } else {
+        android.util.Log.w("TestModeScreen", "Waiting for initialization: testRunner=$testRunner, testId=$testId")
+    }
 
     Scaffold(
         topBar = {
