@@ -98,13 +98,18 @@ pub fn extractCells(
             // Debug first few characters on row 0
             if (row == 0 and col < 15) {
                 const printable_char = if (codepoint >= 32 and codepoint < 127) @as(u8, @intCast(codepoint)) else '?';
-                log.info("Cell[{d},{d}]: '{c}' fg=({d},{d},{d})", .{
+                log.info("Cell[{d},{d}]: codepoint={d} '{c}' tag={s} fg=({d},{d},{d}) bg=({d},{d},{d})", .{
                     row,
                     col,
+                    codepoint,
                     printable_char,
+                    @tagName(cell.content_tag),
                     fg_rgb.r,
                     fg_rgb.g,
                     fg_rgb.b,
+                    bg_rgb.r,
+                    bg_rgb.g,
+                    bg_rgb.b,
                 });
             }
 

@@ -362,14 +362,14 @@ pub fn render(self: *Self) !void {
     self.bg_color_pipeline.use();
     gl.drawArrays(gl.GL_TRIANGLES, 0, 3); // Draw 3 vertices for full-screen triangle
 
-    // TEMPORARILY DISABLED: Render cell backgrounds (blended over bg_color)
-    // self.cell_bg_pipeline.use();
-    // gl.drawArrays(gl.GL_TRIANGLES, 0, 3); // Draw 3 vertices for full-screen triangle
+    // Render cell backgrounds (blended over bg_color)
+    self.cell_bg_pipeline.use();
+    gl.drawArrays(gl.GL_TRIANGLES, 0, 3); // Draw 3 vertices for full-screen triangle
 
     // Check for errors after cell backgrounds (non-fatal for now)
-    // gl.checkError() catch |err| {
-    //     log.warn("GL error after cell_bg rendering (non-fatal): {}", .{err});
-    // };
+    gl.checkError() catch |err| {
+        log.warn("GL error after cell_bg rendering (non-fatal): {}", .{err});
+    };
 
     // Render cell text (blended over cell backgrounds)
     // First activate the pipeline (which binds the VAO)
@@ -524,6 +524,8 @@ pub fn syncFromTerminal(self: *Self) !void {
     @memset(cell_bg_colors, 0);
 
     // Process each cell
+    var skipped_count: usize = 0;
+    var non_ascii_count: usize = 0;
     for (cells) |cell| {
         const idx: usize = @as(usize, cell.row) * @as(usize, self.grid_cols) + @as(usize, cell.col);
 
@@ -537,14 +539,28 @@ pub fn syncFromTerminal(self: *Self) !void {
 
         // Only add renderable glyphs (skip spaces with default colors)
         if (cell.codepoint != ' ' or cell.fg_color[0] != 255 or cell.fg_color[1] != 255 or cell.fg_color[2] != 255) {
+            // Track non-ASCII characters
+            if (cell.codepoint > 127) {
+                non_ascii_count += 1;
+            }
+
             try text_glyphs.append(self.allocator, self.font_system.makeCellText(
-                @intCast(cell.codepoint),
+                cell.codepoint,
                 cell.col,
                 cell.row,
                 cell.fg_color,
             ));
+        } else {
+            skipped_count += 1;
         }
     }
+
+    log.info("Cell processing: {} total cells, {} glyphs added, {} spaces skipped, {} non-ASCII", .{
+        cells.len,
+        text_glyphs.items.len,
+        skipped_count,
+        non_ascii_count,
+    });
 
     // Upload to GPU
     try self.cells_bg_buffer.sync(cell_bg_colors);

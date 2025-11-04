@@ -107,8 +107,22 @@ tasks.register<Exec>("buildNativeLibs") {
     // Use wrapper script that handles nix-shell environment
     commandLine("bash", "scripts/gradle-build-native.sh")
 
-    // Make the task always run (don't cache)
-    outputs.upToDateWhen { false }
+    // Configure inputs - track source files
+    inputs.files(fileTree("../../android/renderer/src") {
+        include("**/*.zig")
+    })
+    inputs.files(fileTree("../../libghostty-vt") {
+        include("**/*.zig")
+        exclude("zig-cache/**")
+        exclude("zig-out/**")
+    })
+    inputs.file("../../android/renderer/build.zig")
+    inputs.file("../../libghostty-vt/build.zig")
+
+    // Configure outputs - track generated libraries
+    outputs.dir("src/main/jniLibs/arm64-v8a")
+    outputs.dir("src/main/jniLibs/armeabi-v7a")
+    outputs.dir("src/main/jniLibs/x86_64")
 
     // Set environment variables
     environment("ANDROID_HOME", System.getenv("ANDROID_HOME") ?: "/home/tapan/Android/Sdk")

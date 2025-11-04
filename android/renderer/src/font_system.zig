@@ -124,8 +124,13 @@ pub const FontSystem = struct {
     }
 
     /// Get atlas position for a character (simple grid layout)
-    fn getAtlasPos(self: FontSystem, char: u8) [2]u32 {
-        if (char < 32 or char > 126) return .{ 0, 0 };
+    /// For Phase 1, only ASCII 32-126 are supported. Out-of-range chars use space (32).
+    fn getAtlasPos(self: FontSystem, codepoint: u21) [2]u32 {
+        // Clamp to ASCII printable range for Phase 1
+        const char: u8 = if (codepoint >= 32 and codepoint <= 126)
+            @intCast(codepoint)
+        else
+            32; // Use space for unsupported characters
 
         const index = char - 32; // Offset to start at 0
         const col = index % ATLAS_COLS;
@@ -190,14 +195,15 @@ pub const FontSystem = struct {
     }
 
     /// Generate CellText instance for rendering a character at a grid position
+    /// For Phase 1, supports ASCII 32-126. Out-of-range codepoints render as space.
     pub fn makeCellText(
         self: FontSystem,
-        char: u8,
+        codepoint: u21,
         grid_col: u16,
         grid_row: u16,
         color: [4]u8,
     ) shaders.CellText {
-        const atlas_pos = self.getAtlasPos(char);
+        const atlas_pos = self.getAtlasPos(codepoint);
 
         return shaders.CellText{
             .glyph_pos = atlas_pos,
