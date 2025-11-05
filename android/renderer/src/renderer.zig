@@ -107,38 +107,26 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     uniforms_buffer.bindBase(0);
 
     // Create cell backgrounds SSBO
-    // For testing: 80x24 grid = 1920 cells
-    const grid_cols: u32 = 80;
-    const grid_rows: u32 = 24;
-    const num_cells = grid_cols * grid_rows;
+    // Initial terminal size (will be resized dynamically based on screen dimensions)
+    const initial_grid_cols: u32 = 80;
+    const initial_grid_rows: u32 = 24;
+    // Allocate buffers with maximum capacity to handle resizing (512x512 = 262k cells)
+    const max_cells: u32 = 512 * 512;
 
     var cells_bg_buffer = try Buffer(u32).init(.{
         .target = .shader_storage,
         .usage = .dynamic_draw,
-    }, num_cells);
+    }, max_cells);
     errdefer cells_bg_buffer.deinit();
 
-    // Initialize test data (checkerboard pattern)
-    var cell_colors = try allocator.alloc(u32, num_cells);
+    // Initialize with cleared data (no checkerboard pattern needed)
+    const cell_colors = try allocator.alloc(u32, max_cells);
     defer allocator.free(cell_colors);
 
-    for (0..grid_rows) |row| {
-        for (0..grid_cols) |col| {
-            const idx = row * grid_cols + col;
+    // Clear all cells to transparent
+    @memset(cell_colors, 0);
 
-            // Create checkerboard: alternate between red and green
-            const is_dark = (row + col) % 2 == 0;
-            if (is_dark) {
-                // Dark red (128, 0, 0, 255)
-                cell_colors[idx] = shaders.Uniforms.pack4u8(128, 0, 0, 255);
-            } else {
-                // Dark green (0, 128, 0, 255)
-                cell_colors[idx] = shaders.Uniforms.pack4u8(0, 128, 0, 255);
-            }
-        }
-    }
-
-    // Upload test data to GPU
+    // Upload cleared data to GPU
     try cells_bg_buffer.sync(cell_colors);
 
     // Bind SSBO to binding point 1 (matches shader layout)
@@ -150,11 +138,11 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     log.info("Font system initialized", .{});
 
-    // Initialize terminal manager
-    var terminal_manager = try TerminalManager.init(allocator, @intCast(grid_cols), @intCast(grid_rows));
+    // Initialize terminal manager with initial dimensions
+    var terminal_manager = try TerminalManager.init(allocator, @intCast(initial_grid_cols), @intCast(initial_grid_rows));
     errdefer terminal_manager.deinit();
 
-    log.info("Terminal manager initialized ({d}x{d})", .{ grid_cols, grid_rows });
+    log.info("Terminal manager initialized ({d}x{d})", .{ initial_grid_cols, initial_grid_rows });
 
     // Get dynamic atlas dimensions based on font size
     const font_atlas_dims = font_system.getAtlasDimensions();
@@ -212,12 +200,11 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     const cell_text_fragment_src = shader_module.loadShaderCode("shaders/glsl/cell_text.f.glsl");
 
     // Create glyphs instance buffer FIRST (before pipeline)
-    // For testing: allocate space for 1920 glyphs (80x24 full screen)
-    const max_glyphs = grid_cols * grid_rows;
+    // Allocate with max capacity to handle terminal resizing
     var glyphs_buffer = try Buffer(shaders.CellText).init(.{
         .target = .array,
         .usage = .dynamic_draw,
-    }, max_glyphs);
+    }, max_cells);
     errdefer glyphs_buffer.deinit();
 
     // Bind the buffer so it's active when VAO attributes are configured
@@ -285,8 +272,8 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .allocator = allocator,
         .font_system = font_system,
         .terminal_manager = terminal_manager,
-        .grid_cols = @intCast(grid_cols),
-        .grid_rows = @intCast(grid_rows),
+        .grid_cols = @intCast(initial_grid_cols),
+        .grid_rows = @intCast(initial_grid_rows),
         .uniforms_buffer = uniforms_buffer,
         .uniforms = uniforms,
         .bg_color_pipeline = bg_color_pipeline,
@@ -335,7 +322,31 @@ pub fn resize(self: *Self, width: u32, height: u32) !void {
         @floatFromInt(height),
     );
 
-    log.info("Cell size: {d}x{d}", .{ self.uniforms.cell_size[0], self.uniforms.cell_size[1] });
+    // Calculate terminal grid dimensions based on screen size and cell size
+    const cell_width = @as(u32, @intFromFloat(self.uniforms.cell_size[0]));
+    const cell_height = @as(u32, @intFromFloat(self.uniforms.cell_size[1]));
+
+    const new_cols: u16 = @intCast(@min(width / cell_width, 512)); // Cap at 512 cols for safety
+    const new_rows: u16 = @intCast(@min(height / cell_height, 512)); // Cap at 512 rows for safety
+
+    // Only resize terminal if dimensions actually changed
+    if (new_cols != self.grid_cols or new_rows != self.grid_rows) {
+        log.info("Resizing terminal from {d}x{d} to {d}x{d}", .{
+            self.grid_cols, self.grid_rows, new_cols, new_rows
+        });
+
+        try self.terminal_manager.resize(new_cols, new_rows);
+        self.grid_cols = new_cols;
+        self.grid_rows = new_rows;
+
+        // Update uniforms with new grid size
+        self.uniforms.grid_size_packed_2u16 = shaders.Uniforms.pack2u16(new_cols, new_rows);
+    }
+
+    log.info("Cell size: {d}x{d}, Grid: {d}x{d}", .{
+        self.uniforms.cell_size[0], self.uniforms.cell_size[1],
+        self.grid_cols, self.grid_rows
+    });
 
     // Upload updated uniforms to GPU
     try self.syncUniforms();
