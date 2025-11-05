@@ -82,6 +82,8 @@ const RendererState = struct {
     renderer: ?Renderer = null,
     initialized: bool = false,
     surface_sized: bool = false,  // Track if surface has been sized at least once
+    pending_width: u32 = 0,
+    pending_height: u32 = 0,
 };
 
 var renderer_state: RendererState = .{};
@@ -145,11 +147,26 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceCreat
         return;
     }
 
-    // DON'T initialize renderer here - we need actual surface dimensions first!
-    // The renderer will be initialized in onSurfaceChanged when we know the real size.
-    // This prevents the terminal from being initialized at wrong dimensions (80x24 default)
-    // and then resized, which causes text reflow that drops characters.
-    log.info("OpenGL context created, awaiting surface dimensions for renderer init", .{});
+    // Initialize renderer with pending dimensions if available
+    const allocator = gpa.allocator();
+    const init_width = renderer_state.pending_width;
+    const init_height = renderer_state.pending_height;
+
+    renderer_state.renderer = Renderer.init(allocator, init_width, init_height) catch |err| {
+        log.err("Failed to initialize renderer: {}", .{err});
+        return;
+    };
+    renderer_state.initialized = true;
+    renderer_state.pending_width = 0;
+    renderer_state.pending_height = 0;
+
+    // If we initialized with dimensions, mark surface as sized
+    if (init_width > 0 and init_height > 0) {
+        renderer_state.surface_sized = true;
+        log.info("Renderer initialized with dimensions {d}x{d}, marked as sized", .{ init_width, init_height });
+    } else {
+        log.info("Renderer initialized with default dimensions, awaiting surface sizing", .{});
+    }
 }
 
 /// Called when OpenGL surface size changes
@@ -171,37 +188,20 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceChang
     // Mark that surface has been sized at least once
     renderer_state.surface_sized = true;
 
-    // Initialize renderer on first surface change (now we have real dimensions!)
+    // Store dimensions for later if renderer not yet initialized
     if (!renderer_state.initialized) {
-        log.info("Initializing renderer with actual surface dimensions: {d}x{d}", .{ width, height });
-
-        const allocator = gpa.allocator();
-        renderer_state.renderer = Renderer.init(allocator, @intCast(width), @intCast(height)) catch |err| {
-            log.err("Failed to initialize renderer: {}", .{err});
-            return;
-        };
-        renderer_state.initialized = true;
-
-        log.info("Renderer initialized successfully with correct dimensions", .{});
-        log.info("Viewport set to {d}x{d}", .{ width, height });
-        return; // Don't resize on first init - we just initialized with correct size!
+        renderer_state.pending_width = @intCast(width);
+        renderer_state.pending_height = @intCast(height);
+        log.warn("Renderer not yet initialized, storing dimensions for later", .{});
+        return;
     }
 
-    // Only resize if dimensions actually changed
+    // Update renderer with new dimensions
     if (renderer_state.renderer) |*renderer| {
-        const current_size = .{ .width = renderer.width, .height = renderer.height };
-        const new_size = .{ .width = @as(u32, @intCast(width)), .height = @as(u32, @intCast(height)) };
-
-        if (current_size.width != new_size.width or current_size.height != new_size.height) {
-            log.info("Surface dimensions changed, resizing renderer", .{});
-            renderer.resize(new_size.width, new_size.height) catch |err| {
-                log.err("Failed to resize renderer: {}", .{err});
-                return;
-            };
-            log.info("Renderer resized to {d}x{d}", .{ width, height });
-        } else {
-            log.debug("Surface dimensions unchanged, skipping resize", .{});
-        }
+        renderer.resize(@intCast(width), @intCast(height)) catch |err| {
+            log.err("Failed to resize renderer: {}", .{err});
+            return;
+        };
     }
 
     log.info("Viewport updated to {d}x{d}", .{ width, height });
@@ -312,6 +312,16 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeProcessInput(
     if (!renderer_state.initialized) {
         log.warn("Attempted to process input before renderer initialized", .{});
         return;
+    }
+
+    // Wait for surface to be sized (with timeout)
+    var wait_count: u32 = 0;
+    while (!renderer_state.surface_sized and wait_count < 100) : (wait_count += 1) {
+        std.Thread.sleep(10 * std.time.ns_per_ms); // Sleep 10ms
+    }
+
+    if (!renderer_state.surface_sized) {
+        log.warn("Timed out waiting for surface to be sized, processing anyway", .{});
     }
 
     if (renderer_state.renderer) |*renderer| {

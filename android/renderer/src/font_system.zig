@@ -25,12 +25,6 @@ pub const FontSystem = struct {
     cell_height: u32,
     baseline: i32,
 
-    /// Maximum glyph bearing values (for viewport padding calculations)
-    max_bearing_x: i32, // Maximum left bearing (positive = glyph extends left of cell origin)
-    min_bearing_x: i32, // Minimum left bearing (negative = glyph starts right of cell origin)
-    max_bearing_y: i32, // Maximum top bearing (positive = glyph extends above baseline)
-    min_bearing_y: i32, // Minimum top bearing (negative = glyph extends below baseline)
-
     /// Dynamic atlas layout based on font size
     glyph_size: u32, // Calculated based on font size
     const ATLAS_COLS = 16; // 16 characters per row
@@ -82,40 +76,6 @@ pub const FontSystem = struct {
 
         log.info("Font metrics: cell={d}x{d}, baseline={d}, glyph_size={d}", .{ cell_width, cell_height, baseline, glyph_size });
 
-        // Calculate maximum bearing values across all ASCII printable characters
-        var max_bearing_x: i32 = 0;
-        var min_bearing_x: i32 = 0;
-        var max_bearing_y: i32 = 0;
-        var min_bearing_y: i32 = 0;
-
-        // Iterate through ASCII printable characters (32-126)
-        var char: u8 = 32;
-        while (char <= 126) : (char += 1) {
-            const char_index = face.getCharIndex(char) orelse continue;
-            face.loadGlyph(char_index, .{ .render = true }) catch continue;
-            const glyph_metrics = face.handle.*.glyph;
-
-            const bearing_x = @as(i32, @intCast(glyph_metrics.*.bitmap_left));
-            const bearing_y = @as(i32, @intCast(glyph_metrics.*.bitmap_top));
-            const glyph_width = @as(i32, @intCast(glyph_metrics.*.bitmap.width));
-            const glyph_height = @as(i32, @intCast(glyph_metrics.*.bitmap.rows));
-
-            // Track maximum extents
-            max_bearing_x = @max(max_bearing_x, bearing_x);
-            min_bearing_x = @min(min_bearing_x, bearing_x);
-            max_bearing_y = @max(max_bearing_y, bearing_y);
-            min_bearing_y = @min(min_bearing_y, bearing_y - glyph_height);
-
-            // Also check right edge overflow (glyph extends past advance width)
-            const right_edge = bearing_x + glyph_width;
-            const advance_x = @as(i32, @intCast(glyph_metrics.*.advance.x >> 6));
-            if (right_edge > advance_x) {
-                max_bearing_x = @max(max_bearing_x, right_edge - advance_x);
-            }
-        }
-
-        log.info("Bearing extents: x=[{d}, {d}], y=[{d}, {d}]", .{ min_bearing_x, max_bearing_x, min_bearing_y, max_bearing_y });
-
         return FontSystem{
             .allocator = allocator,
             .library = library,
@@ -123,10 +83,6 @@ pub const FontSystem = struct {
             .cell_width = cell_width,
             .cell_height = cell_height,
             .baseline = baseline,
-            .max_bearing_x = max_bearing_x,
-            .min_bearing_x = min_bearing_x,
-            .max_bearing_y = max_bearing_y,
-            .min_bearing_y = min_bearing_y,
             .glyph_size = glyph_size,
         };
     }
@@ -135,23 +91,6 @@ pub const FontSystem = struct {
         self.face.deinit();
         self.library.deinit();
         log.info("Font system deinitialized", .{});
-    }
-
-    /// Get required padding in pixels to prevent glyph clipping at viewport edges
-    /// Returns padding needed on right/bottom edges (left/top are handled by cell positioning)
-    pub fn getViewportPadding(self: FontSystem) struct { right: u32, bottom: u32 } {
-        // Right padding: Use cell_width + max_bearing to account for:
-        // 1. The full width of the rightmost cell
-        // 2. Any glyph overhang due to bearings
-        // This ensures glyphs in the rightmost column have space for their full rendered width
-        const bearing_overhang = if (self.max_bearing_x > 0) @as(u32, @intCast(self.max_bearing_x)) else 0;
-        const right_padding = self.cell_width + bearing_overhang;
-
-        // Bottom padding: Use cell_height + bearing to be consistent
-        const bearing_underhang = if (self.min_bearing_y < 0) @as(u32, @intCast(-self.min_bearing_y)) else 0;
-        const bottom_padding = self.cell_height + bearing_underhang;
-
-        return .{ .right = right_padding, .bottom = bottom_padding };
     }
 
     /// Get cell dimensions for updating renderer uniforms

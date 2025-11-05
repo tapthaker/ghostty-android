@@ -118,13 +118,6 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) !Self {
     const cell_width = @as(u32, @intFromFloat(cell_size[0]));
     const cell_height = @as(u32, @intFromFloat(cell_size[1]));
 
-    // Calculate viewport padding needed to prevent glyph clipping
-    // Glyphs can extend past their cell boundaries due to font bearings
-    const padding = font_system.getViewportPadding();
-    log.info("Viewport padding: right={d}px, bottom={d}px", .{ padding.right, padding.bottom });
-
-    // Calculate grid using FULL viewport (no padding subtraction)
-    // The projection matrix will be expanded to include padding area
     const initial_grid_cols: u32 = if (width > 0 and cell_width > 0)
         @min(width / cell_width, 512)
     else
@@ -274,21 +267,13 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) !Self {
     const actual_width = if (width > 0) @as(f32, @floatFromInt(width)) else 800.0;
     const actual_height = if (height > 0) @as(f32, @floatFromInt(height)) else 600.0;
 
-    // Expand projection matrix to include padding area beyond viewport
-    // This allows glyphs to render past screen edges without clipping
-    const projection_width = actual_width + @as(f32, @floatFromInt(padding.right));
-    const projection_height = actual_height + @as(f32, @floatFromInt(padding.bottom));
-
     const uniforms = shaders.Uniforms{
-        .projection_matrix = shaders.createOrthoMatrix(projection_width, projection_height),
+        .projection_matrix = shaders.createOrthoMatrix(actual_width, actual_height),
         .screen_size = .{ actual_width, actual_height },
         .cell_size = font_system.getCellSize(), // Use actual font metrics
         .grid_size_packed_2u16 = shaders.Uniforms.pack2u16(@intCast(initial_grid_cols), @intCast(initial_grid_rows)),
         .grid_padding = .{ 0.0, 0.0, 0.0, 0.0 },
-        .padding_extend = .{
-            .right = true,  // Extend rightmost cell colors into right padding
-            .down = true,   // Extend bottommost cell colors into bottom padding
-        },
+        .padding_extend = .{},
         .min_contrast = 1.0,
         .cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(255, 255), // Off-screen to avoid color override
         .cursor_color_packed_4u8 = shaders.Uniforms.pack4u8(255, 255, 255, 255), // White
@@ -359,26 +344,18 @@ pub fn resize(self: *Self, width: u32, height: u32) !void {
         @floatFromInt(height),
     };
 
-    // Get viewport padding for glyph clipping prevention
-    const padding = self.font_system.getViewportPadding();
-
-    // Expand projection matrix to include padding area beyond viewport
-    // This allows glyphs to render past screen edges without clipping
-    const projection_width = @as(f32, @floatFromInt(width)) + @as(f32, @floatFromInt(padding.right));
-    const projection_height = @as(f32, @floatFromInt(height)) + @as(f32, @floatFromInt(padding.bottom));
-
+    // Recalculate orthographic projection matrix
     self.uniforms.projection_matrix = shaders.createOrthoMatrix(
-        projection_width,
-        projection_height,
+        @floatFromInt(width),
+        @floatFromInt(height),
     );
 
     // Calculate terminal grid dimensions based on screen size and cell size
     const cell_width = @as(u32, @intFromFloat(self.uniforms.cell_size[0]));
     const cell_height = @as(u32, @intFromFloat(self.uniforms.cell_size[1]));
 
-    // Calculate grid using FULL viewport (no padding subtraction)
-    const new_cols: u16 = @intCast(@min(width / cell_width, 512));
-    const new_rows: u16 = @intCast(@min(height / cell_height, 512));
+    const new_cols: u16 = @intCast(@min(width / cell_width, 512)); // Cap at 512 cols for safety
+    const new_rows: u16 = @intCast(@min(height / cell_height, 512)); // Cap at 512 rows for safety
 
     // Only resize terminal if dimensions actually changed
     if (new_cols != self.grid_cols or new_rows != self.grid_rows) {
@@ -563,7 +540,7 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
 
 /// Update renderer buffers from terminal state
 pub fn syncFromTerminal(self: *Self) !void {
-    log.info("Syncing renderer from terminal state - grid_cols={} grid_rows={}", .{ self.grid_cols, self.grid_rows });
+    log.debug("Syncing renderer from terminal state", .{});
 
     // Extract cell data from terminal
     const cells = try screen_extractor.extractCells(
