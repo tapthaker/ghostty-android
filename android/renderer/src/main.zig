@@ -81,6 +81,7 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const RendererState = struct {
     renderer: ?Renderer = null,
     initialized: bool = false,
+    surface_sized: bool = false,  // Track if surface has been sized at least once
     pending_width: u32 = 0,
     pending_height: u32 = 0,
 };
@@ -146,25 +147,25 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceCreat
         return;
     }
 
-    // Initialize renderer
+    // Initialize renderer with pending dimensions if available
     const allocator = gpa.allocator();
-    renderer_state.renderer = Renderer.init(allocator) catch |err| {
+    const init_width = renderer_state.pending_width;
+    const init_height = renderer_state.pending_height;
+
+    renderer_state.renderer = Renderer.init(allocator, init_width, init_height) catch |err| {
         log.err("Failed to initialize renderer: {}", .{err});
         return;
     };
     renderer_state.initialized = true;
-    log.info("Renderer initialized successfully", .{});
+    renderer_state.pending_width = 0;
+    renderer_state.pending_height = 0;
 
-    // Apply pending dimensions if onSurfaceChanged was called during initialization
-    if (renderer_state.pending_width > 0 and renderer_state.pending_height > 0) {
-        log.info("Applying pending dimensions: {d}x{d}", .{ renderer_state.pending_width, renderer_state.pending_height });
-        if (renderer_state.renderer) |*r| {
-            r.resize(renderer_state.pending_width, renderer_state.pending_height) catch |err| {
-                log.err("Failed to apply pending resize: {}", .{err});
-            };
-        }
-        renderer_state.pending_width = 0;
-        renderer_state.pending_height = 0;
+    // If we initialized with dimensions, mark surface as sized
+    if (init_width > 0 and init_height > 0) {
+        renderer_state.surface_sized = true;
+        log.info("Renderer initialized with dimensions {d}x{d}, marked as sized", .{ init_width, init_height });
+    } else {
+        log.info("Renderer initialized with default dimensions, awaiting surface sizing", .{});
     }
 }
 
@@ -183,6 +184,9 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceChang
 
     // Set OpenGL viewport
     c.glViewport(0, 0, width, height);
+
+    // Mark that surface has been sized at least once
+    renderer_state.surface_sized = true;
 
     // Store dimensions for later if renderer not yet initialized
     if (!renderer_state.initialized) {
@@ -308,6 +312,16 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeProcessInput(
     if (!renderer_state.initialized) {
         log.warn("Attempted to process input before renderer initialized", .{});
         return;
+    }
+
+    // Wait for surface to be sized (with timeout)
+    var wait_count: u32 = 0;
+    while (!renderer_state.surface_sized and wait_count < 100) : (wait_count += 1) {
+        std.Thread.sleep(10 * std.time.ns_per_ms); // Sleep 10ms
+    }
+
+    if (!renderer_state.surface_sized) {
+        log.warn("Timed out waiting for surface to be sized, processing anyway", .{});
     }
 
     if (renderer_state.renderer) |*renderer| {

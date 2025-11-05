@@ -67,9 +67,9 @@ cell_text_pipeline: Pipeline,
 /// Number of glyphs to render (for testing)
 num_test_glyphs: u32 = 0,
 
-/// Initialize the renderer
-pub fn init(allocator: std.mem.Allocator) !Self {
-    log.info("Initializing renderer", .{});
+/// Initialize the renderer with optional initial dimensions
+pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) !Self {
+    log.info("Initializing renderer with dimensions: {d}x{d}", .{ width, height });
 
     // Load and compile bg_color shaders
     const bg_color_vertex_src = shader_module.loadShaderCode("shaders/glsl/full_screen.v.glsl");
@@ -106,10 +106,35 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     // Note: We use binding 0 for UBO since binding 1 is used for SSBO
     uniforms_buffer.bindBase(0);
 
+    // Initialize font system first to get cell dimensions
+    var font_system = try FontSystem.init(allocator, 48);
+    errdefer font_system.deinit();
+
+    log.info("Font system initialized", .{});
+
+    // Calculate initial terminal grid dimensions based on screen size
+    // Use provided dimensions if non-zero, otherwise default to 80x24
+    const cell_size = font_system.getCellSize();
+    const cell_width = @as(u32, @intFromFloat(cell_size[0]));
+    const cell_height = @as(u32, @intFromFloat(cell_size[1]));
+
+    const initial_grid_cols: u32 = if (width > 0 and cell_width > 0)
+        @min(width / cell_width, 512)
+    else
+        80;
+    const initial_grid_rows: u32 = if (height > 0 and cell_height > 0)
+        @min(height / cell_height, 512)
+    else
+        24;
+
+    log.info("Calculated terminal grid: {d}x{d} (cell size: {d}x{d})", .{
+        initial_grid_cols,
+        initial_grid_rows,
+        cell_width,
+        cell_height,
+    });
+
     // Create cell backgrounds SSBO
-    // Initial terminal size (will be resized dynamically based on screen dimensions)
-    const initial_grid_cols: u32 = 80;
-    const initial_grid_rows: u32 = 24;
     // Allocate buffers with maximum capacity to handle resizing (512x512 = 262k cells)
     const max_cells: u32 = 512 * 512;
 
@@ -132,13 +157,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     // Bind SSBO to binding point 1 (matches shader layout)
     cells_bg_buffer.bindBase(1);
 
-    // Initialize font system
-    var font_system = try FontSystem.init(allocator, 48);
-    errdefer font_system.deinit();
-
-    log.info("Font system initialized", .{});
-
-    // Initialize terminal manager with initial dimensions
+    // Initialize terminal manager with calculated dimensions
     var terminal_manager = try TerminalManager.init(allocator, @intCast(initial_grid_cols), @intCast(initial_grid_rows));
     errdefer terminal_manager.deinit();
 
@@ -244,12 +263,15 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     // (This will be done in a temporary renderer-like struct before full init)
     _ = 0; // Reserved for future test glyph count
 
-    // Initialize default uniforms
+    // Initialize default uniforms with actual dimensions
+    const actual_width = if (width > 0) @as(f32, @floatFromInt(width)) else 800.0;
+    const actual_height = if (height > 0) @as(f32, @floatFromInt(height)) else 600.0;
+
     const uniforms = shaders.Uniforms{
-        .projection_matrix = shaders.createOrthoMatrix(800.0, 600.0), // Will be updated on resize
-        .screen_size = .{ 800.0, 600.0 },
+        .projection_matrix = shaders.createOrthoMatrix(actual_width, actual_height),
+        .screen_size = .{ actual_width, actual_height },
         .cell_size = font_system.getCellSize(), // Use actual font metrics
-        .grid_size_packed_2u16 = shaders.Uniforms.pack2u16(80, 24), // 80x24 default
+        .grid_size_packed_2u16 = shaders.Uniforms.pack2u16(@intCast(initial_grid_cols), @intCast(initial_grid_rows)),
         .grid_padding = .{ 0.0, 0.0, 0.0, 0.0 },
         .padding_extend = .{},
         .min_contrast = 1.0,
@@ -265,13 +287,19 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     };
 
     log.info("Cell size from font: {d}x{d}", .{ uniforms.cell_size[0], uniforms.cell_size[1] });
-
-    log.info("Renderer initialized successfully", .{});
+    log.info("Renderer initialized successfully with {d}x{d} grid ({d}x{d} screen)", .{
+        initial_grid_cols,
+        initial_grid_rows,
+        actual_width,
+        actual_height,
+    });
 
     return .{
         .allocator = allocator,
         .font_system = font_system,
         .terminal_manager = terminal_manager,
+        .width = if (width > 0) width else 0,
+        .height = if (height > 0) height else 0,
         .grid_cols = @intCast(initial_grid_cols),
         .grid_rows = @intCast(initial_grid_rows),
         .uniforms_buffer = uniforms_buffer,
