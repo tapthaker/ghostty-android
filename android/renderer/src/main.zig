@@ -165,8 +165,8 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceChang
 
     log.info("nativeOnSurfaceChanged: {d}x{d}", .{ width, height });
 
-    // Set OpenGL viewport
-    c.glViewport(0, 0, width, height);
+    // Note: glViewport will be set by the renderer to match the expanded projection matrix
+    // This ensures viewport and projection dimensions are in sync to avoid GL errors
 
     // Mark that surface has been sized at least once
     renderer_state.surface_sized = true;

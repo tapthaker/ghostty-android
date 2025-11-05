@@ -279,6 +279,19 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) !Self {
     const projection_width = actual_width + @as(f32, @floatFromInt(padding.right));
     const projection_height = actual_height + @as(f32, @floatFromInt(padding.bottom));
 
+    // Set OpenGL viewport to match expanded projection matrix
+    // This prevents GL_INVALID_VALUE errors from projection/viewport mismatch
+    gl.viewport(
+        0,
+        0,
+        @intFromFloat(projection_width),
+        @intFromFloat(projection_height),
+    );
+    log.info("Viewport set to {d}x{d} (includes padding)", .{
+        @as(u32, @intFromFloat(projection_width)),
+        @as(u32, @intFromFloat(projection_height))
+    });
+
     const uniforms = shaders.Uniforms{
         .projection_matrix = shaders.createOrthoMatrix(projection_width, projection_height),
         .screen_size = .{ actual_width, actual_height },
@@ -370,6 +383,14 @@ pub fn resize(self: *Self, width: u32, height: u32) !void {
     self.uniforms.projection_matrix = shaders.createOrthoMatrix(
         projection_width,
         projection_height,
+    );
+
+    // Set OpenGL viewport to match expanded projection matrix
+    gl.viewport(
+        0,
+        0,
+        @intFromFloat(projection_width),
+        @intFromFloat(projection_height),
     );
 
     // Calculate terminal grid dimensions based on screen size and cell size
