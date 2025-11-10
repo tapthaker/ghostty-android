@@ -115,17 +115,17 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceCreat
     _ = env;
     _ = obj;
 
-    log.info("nativeOnSurfaceCreated", .{});
+    log.info("nativeOnSurfaceCreated - OpenGL context (re)created", .{});
 
     // Get OpenGL version
     const version = c.glGetString(c.GL_VERSION);
-    const renderer = c.glGetString(c.GL_RENDERER);
+    const renderer_name = c.glGetString(c.GL_RENDERER);
     const vendor = c.glGetString(c.GL_VENDOR);
 
     if (version) |v| {
         log.info("OpenGL Version: {s}", .{v});
     }
-    if (renderer) |r| {
+    if (renderer_name) |r| {
         log.info("OpenGL Renderer: {s}", .{r});
     }
     if (vendor) |vnd| {
@@ -145,11 +145,27 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceCreat
         return;
     }
 
-    // DON'T initialize renderer here - we need actual surface dimensions first!
-    // The renderer will be initialized in onSurfaceChanged when we know the real size.
-    // This prevents the terminal from being initialized at wrong dimensions (80x24 default)
-    // and then resized, which causes text reflow that drops characters.
-    log.info("OpenGL context created, awaiting surface dimensions for renderer init", .{});
+    // IMPORTANT: When onSurfaceCreated is called, the OpenGL context has been (re)created.
+    // This happens when:
+    // - The app first starts
+    // - The app returns from background
+    // - The OpenGL context is lost for any reason
+    //
+    // When the context is recreated, all OpenGL objects (shaders, programs, VAOs, textures, buffers)
+    // become invalid and must be recreated.
+
+    // Clean up the old renderer if it exists (its OpenGL objects are now invalid)
+    if (renderer_state.renderer) |*renderer| {
+        log.info("Cleaning up old renderer (OpenGL context was recreated)", .{});
+        renderer.deinit();
+        renderer_state.renderer = null;
+    }
+
+    // Reset initialization state so onSurfaceChanged will recreate the renderer
+    renderer_state.initialized = false;
+    renderer_state.surface_sized = false;
+
+    log.info("OpenGL context ready, renderer will be recreated in onSurfaceChanged", .{});
 }
 
 /// Called when OpenGL surface size changes
