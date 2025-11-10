@@ -28,6 +28,23 @@ pub const CellData = struct {
 
     /// Cell row position
     row: u16,
+
+    /// Text style attributes
+    bold: bool = false,
+    italic: bool = false,
+    dim: bool = false, // called 'faint' in VT
+    strikethrough: bool = false,
+    underline: Underline = .none,
+    inverse: bool = false,
+
+    pub const Underline = enum(u3) {
+        none = 0,
+        single = 1,
+        double = 2,
+        curly = 3,
+        dotted = 4,
+        dashed = 5,
+    };
 };
 
 /// Extract all visible cells from the terminal screen
@@ -95,12 +112,28 @@ pub fn extractCells(
                 .bg_color_palette, .bg_color_rgb => ' ', // Color-only cells render as space
             };
 
+            // Extract text style attributes from VT style flags
+            const underline_type: CellData.Underline = switch (style_val.flags.underline) {
+                .none => .none,
+                .single => .single,
+                .double => .double,
+                .curly => .curly,
+                .dotted => .dotted,
+                .dashed => .dashed,
+            };
+
             try cells.append(allocator, .{
                 .codepoint = codepoint,
                 .fg_color = .{ fg_rgb.r, fg_rgb.g, fg_rgb.b, 255 },
                 .bg_color = .{ bg_rgb.r, bg_rgb.g, bg_rgb.b, 255 },
                 .col = @intCast(col),
                 .row = @intCast(row),
+                .bold = style_val.flags.bold,
+                .italic = style_val.flags.italic,
+                .dim = style_val.flags.faint,
+                .strikethrough = style_val.flags.strikethrough,
+                .underline = underline_type,
+                .inverse = style_val.flags.inverse,
             });
         }
     }

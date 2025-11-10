@@ -573,6 +573,7 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
             @intCast(i), // col
             0, // row
             .{ 255, 255, 255, 255 }, // white text
+            .{}, // default attributes
         );
     }
 
@@ -627,11 +628,22 @@ pub fn syncFromTerminal(self: *Self) !void {
                 non_ascii_count += 1;
             }
 
+            // Convert CellData attributes to CellText attributes
+            const attributes = shaders.CellText.Attributes{
+                .bold = cell.bold,
+                .italic = cell.italic,
+                .dim = cell.dim,
+                .strikethrough = cell.strikethrough,
+                .underline = @enumFromInt(@intFromEnum(cell.underline)),
+                .inverse = cell.inverse,
+            };
+
             try text_glyphs.append(self.allocator, self.font_system.makeCellText(
                 cell.codepoint,
                 cell.col,
                 cell.row,
                 cell.fg_color,
+                attributes,
             ));
         } else {
             skipped_count += 1;

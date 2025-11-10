@@ -112,10 +112,30 @@ pub const CellText = extern struct {
         is_cursor_glyph: bool = false,
         _padding: u6 = 0,
     } align(1) = .{},
+    attributes: Attributes align(2) = .{},
 
     pub const Atlas = enum(u8) {
         grayscale = 0,
         color = 1,
+    };
+
+    pub const Attributes = packed struct(u16) {
+        bold: bool = false,
+        italic: bool = false,
+        dim: bool = false,
+        strikethrough: bool = false,
+        underline: Underline = .none,
+        inverse: bool = false,
+        _padding: u8 = 0,
+
+        pub const Underline = enum(u3) {
+            none = 0,
+            single = 1,
+            double = 2,
+            curly = 3,
+            dotted = 4,
+            dashed = 5,
+        };
     };
 
     comptime {

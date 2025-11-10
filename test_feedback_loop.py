@@ -97,7 +97,19 @@ class TestFeedbackLoop:
         print(f"  LAUNCHING TEST: {test_id}")
         print(f"{'='*60}\n")
 
-        # First, clear logcat
+        # First, force-stop any existing instance
+        try:
+            subprocess.run(
+                ["adb", "shell", "am", "force-stop", "com.ghostty.android"],
+                capture_output=True,
+                check=True
+            )
+            print("✓ Stopped existing app instance")
+            time.sleep(1)  # Give it a moment to fully stop
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️  Warning: Failed to stop app: {e}")
+
+        # Clear logcat
         subprocess.run(["adb", "logcat", "-c"], capture_output=True)
 
         # Launch app with auto-start and specific test

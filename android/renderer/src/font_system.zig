@@ -14,11 +14,30 @@ const c = @cImport({
 
 const log = std.log.scoped(.font_system);
 
+/// Font style variants for bold/italic rendering
+pub const FontStyle = enum(u2) {
+    regular = 0,
+    bold = 1,
+    italic = 2,
+    bold_italic = 3,
+};
+
+/// Atlas data for tracking glyph positions per style
+pub const AtlasData = struct {
+    positions: std.AutoHashMap(u21, [2]u32),
+    next_x: u32,
+    next_y: u32,
+    row_height: u32,
+};
+
 /// Font system state
 pub const FontSystem = struct {
     allocator: std.mem.Allocator,
     library: freetype.Library,
-    face: freetype.Face,
+    face: freetype.Face, // Regular face
+    face_bold: freetype.Face,
+    face_italic: freetype.Face,
+    face_bold_italic: freetype.Face,
 
     /// Font metrics
     cell_width: u32,
@@ -33,6 +52,14 @@ pub const FontSystem = struct {
 
     /// Dynamic atlas layout based on font size
     glyph_size: u32, // Calculated based on font size
+
+    /// Atlas data per style (using shared atlas for all styles)
+    atlas_regular: AtlasData,
+    atlas_bold: AtlasData,
+    atlas_italic: AtlasData,
+    atlas_bold_italic: AtlasData,
+
+    // Constants must come after all fields
     const ATLAS_COLS = 16; // 16 characters per row
 
     /// Common Unicode characters beyond ASCII (for terminal emulation)
@@ -49,21 +76,45 @@ pub const FontSystem = struct {
 
         log.info("FreeType library initialized", .{});
 
-        // Load font from embedded data
+        // Load regular font from embedded data
         const font_data = embedded_fonts.jetbrains_mono_regular;
         var face = try library.initMemoryFace(font_data, 0);
         errdefer face.deinit();
 
-        log.info("Font face loaded ({d} bytes)", .{font_data.len});
+        log.info("Regular font face loaded ({d} bytes)", .{font_data.len});
 
-        // Set character size (using 96 DPI)
+        // Load bold font
+        const font_data_bold = embedded_fonts.jetbrains_mono_bold;
+        var face_bold = try library.initMemoryFace(font_data_bold, 0);
+        errdefer face_bold.deinit();
+
+        log.info("Bold font face loaded ({d} bytes)", .{font_data_bold.len});
+
+        // Load italic font
+        const font_data_italic = embedded_fonts.jetbrains_mono_italic;
+        var face_italic = try library.initMemoryFace(font_data_italic, 0);
+        errdefer face_italic.deinit();
+
+        log.info("Italic font face loaded ({d} bytes)", .{font_data_italic.len});
+
+        // Load bold-italic font
+        const font_data_bold_italic = embedded_fonts.jetbrains_mono_bold_italic;
+        var face_bold_italic = try library.initMemoryFace(font_data_bold_italic, 0);
+        errdefer face_bold_italic.deinit();
+
+        log.info("Bold-Italic font face loaded ({d} bytes)", .{font_data_bold_italic.len});
+
+        // Set character size for all faces (using 96 DPI)
         // FreeType uses 1/64th of points, so multiply pixel size by 64
         // For pixel-based sizing, we use the formula: pixels * 64 * 72 / dpi
         const dpi = 96;
         const char_height_26_6: i32 = @intCast((font_size_px * 64 * 72) / dpi);
         try face.setCharSize(0, char_height_26_6, dpi, dpi);
+        try face_bold.setCharSize(0, char_height_26_6, dpi, dpi);
+        try face_italic.setCharSize(0, char_height_26_6, dpi, dpi);
+        try face_bold_italic.setCharSize(0, char_height_26_6, dpi, dpi);
 
-        log.info("Font size set to {d}px at {d} DPI", .{ font_size_px, dpi });
+        log.info("Font size set to {d}px at {d} DPI for all faces", .{ font_size_px, dpi });
 
         // Calculate font metrics by measuring a typical character
         const char_m_index = face.getCharIndex('M') orelse return error.GlyphNotFound;
@@ -116,10 +167,39 @@ pub const FontSystem = struct {
 
         log.info("Bearing extents: x=[{d}, {d}], y=[{d}, {d}]", .{ min_bearing_x, max_bearing_x, min_bearing_y, max_bearing_y });
 
+        // Initialize atlas data structures for each style
+        const atlas_regular = AtlasData{
+            .positions = std.AutoHashMap(u21, [2]u32).init(allocator),
+            .next_x = 0,
+            .next_y = 0,
+            .row_height = 0,
+        };
+        const atlas_bold = AtlasData{
+            .positions = std.AutoHashMap(u21, [2]u32).init(allocator),
+            .next_x = 0,
+            .next_y = 0,
+            .row_height = 0,
+        };
+        const atlas_italic = AtlasData{
+            .positions = std.AutoHashMap(u21, [2]u32).init(allocator),
+            .next_x = 0,
+            .next_y = 0,
+            .row_height = 0,
+        };
+        const atlas_bold_italic = AtlasData{
+            .positions = std.AutoHashMap(u21, [2]u32).init(allocator),
+            .next_x = 0,
+            .next_y = 0,
+            .row_height = 0,
+        };
+
         return FontSystem{
             .allocator = allocator,
             .library = library,
             .face = face,
+            .face_bold = face_bold,
+            .face_italic = face_italic,
+            .face_bold_italic = face_bold_italic,
             .cell_width = cell_width,
             .cell_height = cell_height,
             .baseline = baseline,
@@ -128,11 +208,22 @@ pub const FontSystem = struct {
             .max_bearing_y = max_bearing_y,
             .min_bearing_y = min_bearing_y,
             .glyph_size = glyph_size,
+            .atlas_regular = atlas_regular,
+            .atlas_bold = atlas_bold,
+            .atlas_italic = atlas_italic,
+            .atlas_bold_italic = atlas_bold_italic,
         };
     }
 
     pub fn deinit(self: *FontSystem) void {
+        self.atlas_regular.positions.deinit();
+        self.atlas_bold.positions.deinit();
+        self.atlas_italic.positions.deinit();
+        self.atlas_bold_italic.positions.deinit();
         self.face.deinit();
+        self.face_bold.deinit();
+        self.face_italic.deinit();
+        self.face_bold_italic.deinit();
         self.library.deinit();
         log.info("Font system deinitialized", .{});
     }
@@ -162,13 +253,23 @@ pub const FontSystem = struct {
         };
     }
 
+    /// Get atlas data for a specific style
+    fn getAtlasForStyle(self: *FontSystem, style: FontStyle) *AtlasData {
+        return switch (style) {
+            .regular => &self.atlas_regular,
+            .bold => &self.atlas_bold,
+            .italic => &self.atlas_italic,
+            .bold_italic => &self.atlas_bold_italic,
+        };
+    }
+
     /// Render ASCII and common Unicode characters into atlas and return atlas data
     pub fn populateAtlas(
         self: *FontSystem,
         atlas_width: u32,
         atlas_height: u32,
     ) ![]u8 {
-        log.info("Populating atlas ({d}x{d}) with characters", .{ atlas_width, atlas_height });
+        log.info("Populating atlas ({d}x{d}) with characters for all styles", .{ atlas_width, atlas_height });
 
         // Allocate atlas buffer (R8 format = 1 byte per pixel)
         const atlas_data = try self.allocator.alloc(u8, atlas_width * atlas_height);
@@ -177,27 +278,43 @@ pub const FontSystem = struct {
         // Clear atlas to transparent
         @memset(atlas_data, 0);
 
-        // Render printable ASCII characters (32-126)
-        var char: u8 = 32;
-        while (char <= 126) : (char += 1) {
-            const atlas_pos = self.getAtlasPos(char);
-            try self.renderGlyphToAtlas(char, atlas_pos, atlas_data, atlas_width, atlas_height);
+        // Render all four styles
+        const styles = [_]FontStyle{ .regular, .bold, .italic, .bold_italic };
+        for (styles) |style| {
+            log.info("Populating atlas for style: {s}", .{@tagName(style)});
+
+            // Render printable ASCII characters (32-126)
+            var char: u8 = 32;
+            while (char <= 126) : (char += 1) {
+                const atlas_pos = self.getAtlasPos(char, style);
+                try self.renderGlyphToAtlas(char, style, atlas_pos, atlas_data, atlas_width, atlas_height);
+
+                // Store position in atlas hashmap for this style
+                const atlas = self.getAtlasForStyle(style);
+                try atlas.positions.put(char, atlas_pos);
+            }
+
+            // Render common Unicode characters
+            for (UNICODE_CHARS) |unicode_char| {
+                const atlas_pos = self.getAtlasPos(unicode_char, style);
+                try self.renderGlyphToAtlasUnicode(unicode_char, style, atlas_pos, atlas_data, atlas_width, atlas_height);
+
+                // Store position in atlas hashmap for this style
+                const atlas = self.getAtlasForStyle(style);
+                try atlas.positions.put(unicode_char, atlas_pos);
+            }
         }
 
-        // Render common Unicode characters
-        for (UNICODE_CHARS) |unicode_char| {
-            const atlas_pos = self.getAtlasPos(unicode_char);
-            try self.renderGlyphToAtlasUnicode(unicode_char, atlas_pos, atlas_data, atlas_width, atlas_height);
-        }
-
-        log.info("Atlas populated with {d} ASCII + {d} Unicode characters", .{ 127 - 32, UNICODE_CHARS.len });
+        log.info("Atlas populated with {d} ASCII + {d} Unicode characters for all 4 styles", .{ 127 - 32, UNICODE_CHARS.len });
 
         return atlas_data;
     }
 
-    /// Get atlas position for a character (simple grid layout)
-    /// Supports ASCII 32-126 and common Unicode characters. Out-of-range chars use space (32).
-    fn getAtlasPos(self: FontSystem, codepoint: u21) [2]u32 {
+    /// Get atlas position for a character with specific font style
+    /// The atlas is organized with different styles in quadrants:
+    /// Top-left: regular, Top-right: bold
+    /// Bottom-left: italic, Bottom-right: bold_italic
+    fn getAtlasPos(self: FontSystem, codepoint: u21, style: FontStyle) [2]u32 {
         var index: u32 = 0;
 
         // Check if it's printable ASCII (32-126)
@@ -223,27 +340,50 @@ pub const FontSystem = struct {
         const col = index % ATLAS_COLS;
         const row = index / ATLAS_COLS;
 
-        // Cast to u32 before multiplication to prevent overflow
-        const pos_x: u32 = col * self.glyph_size;
-        const pos_y: u32 = row * self.glyph_size;
+        // Base position within the quadrant
+        const base_x: u32 = col * self.glyph_size;
+        const base_y: u32 = row * self.glyph_size;
 
-        return .{ pos_x, pos_y };
+        // Calculate number of rows needed for all characters in one style
+        const num_chars: u32 = 95 + @as(u32, @intCast(UNICODE_CHARS.len));
+        const num_rows: u32 = (num_chars + ATLAS_COLS - 1) / ATLAS_COLS;
+        const quadrant_width = ATLAS_COLS * self.glyph_size;
+        const quadrant_height = num_rows * self.glyph_size;
+
+        // Offset based on style (organize in 2x2 grid)
+        const style_offset: [2]u32 = switch (style) {
+            .regular => .{ 0, 0 }, // Top-left
+            .bold => .{ quadrant_width, 0 }, // Top-right
+            .italic => .{ 0, quadrant_height }, // Bottom-left
+            .bold_italic => .{ quadrant_width, quadrant_height }, // Bottom-right
+        };
+
+        return .{ base_x + style_offset[0], base_y + style_offset[1] };
     }
 
     /// Render a single ASCII glyph into the atlas at the specified position
     fn renderGlyphToAtlas(
         self: *FontSystem,
         char: u8,
+        style: FontStyle,
         atlas_pos: [2]u32,
         atlas_data: []u8,
         atlas_width: u32,
         atlas_height: u32,
     ) !void {
-        // Load and render glyph
-        const glyph_index = self.face.getCharIndex(char) orelse return; // Skip if glyph doesn't exist
-        try self.face.loadGlyph(glyph_index, .{ .render = true });
-        try self.face.renderGlyph(.normal);
-        const glyph = self.face.handle.*.glyph;
+        // Select the appropriate face and render the glyph
+        const face = switch (style) {
+            .regular => self.face,
+            .bold => self.face_bold,
+            .italic => self.face_italic,
+            .bold_italic => self.face_bold_italic,
+        };
+
+        const glyph_index = face.getCharIndex(char) orelse return;
+        try face.loadGlyph(glyph_index, .{ .render = true });
+        try face.renderGlyph(.normal);
+
+        const glyph = face.handle.*.glyph;
         const bitmap = glyph.*.bitmap;
 
         // Get bitmap dimensions
@@ -285,16 +425,25 @@ pub const FontSystem = struct {
     fn renderGlyphToAtlasUnicode(
         self: *FontSystem,
         codepoint: u21,
+        style: FontStyle,
         atlas_pos: [2]u32,
         atlas_data: []u8,
         atlas_width: u32,
         atlas_height: u32,
     ) !void {
-        // Load and render glyph
-        const glyph_index = self.face.getCharIndex(codepoint) orelse return; // Skip if glyph doesn't exist
-        try self.face.loadGlyph(glyph_index, .{ .render = true });
-        try self.face.renderGlyph(.normal);
-        const glyph = self.face.handle.*.glyph;
+        // Select the appropriate face and render the glyph
+        const face = switch (style) {
+            .regular => self.face,
+            .bold => self.face_bold,
+            .italic => self.face_italic,
+            .bold_italic => self.face_bold_italic,
+        };
+
+        const glyph_index = face.getCharIndex(codepoint) orelse return;
+        try face.loadGlyph(glyph_index, .{ .render = true });
+        try face.renderGlyph(.normal);
+
+        const glyph = face.handle.*.glyph;
         const bitmap = glyph.*.bitmap;
 
         // Get bitmap dimensions
@@ -340,8 +489,20 @@ pub const FontSystem = struct {
         grid_col: u16,
         grid_row: u16,
         color: [4]u8,
+        attributes: shaders.CellText.Attributes,
     ) shaders.CellText {
-        const atlas_pos = self.getAtlasPos(codepoint);
+        // Determine font style from attributes
+        const style: FontStyle = if (attributes.bold and attributes.italic)
+            .bold_italic
+        else if (attributes.bold)
+            .bold
+        else if (attributes.italic)
+            .italic
+        else
+            .regular;
+
+        // Get atlas position for this style
+        const atlas_pos = self.getAtlasPos(codepoint, style);
 
         return shaders.CellText{
             .glyph_pos = atlas_pos,
@@ -351,18 +512,25 @@ pub const FontSystem = struct {
             .color = color,
             .atlas = .grayscale,
             .bools = .{},
+            .attributes = attributes,
         };
     }
 
     /// Calculate required atlas dimensions for the font size
     /// Returns [width, height] in pixels
+    /// Atlas is organized in a 2x2 grid to hold all 4 font styles (regular, bold, italic, bold_italic)
     pub fn getAtlasDimensions(self: FontSystem) [2]u32 {
         // ASCII printable chars: 32-126 = 95 characters + Unicode chars
         const num_chars: u32 = 95 + @as(u32, @intCast(UNICODE_CHARS.len));
         const num_rows: u32 = (num_chars + ATLAS_COLS - 1) / ATLAS_COLS; // Ceiling division
 
-        const width: u32 = ATLAS_COLS * self.glyph_size;
-        const height: u32 = num_rows * self.glyph_size;
+        // Single quadrant dimensions
+        const quadrant_width: u32 = ATLAS_COLS * self.glyph_size;
+        const quadrant_height: u32 = num_rows * self.glyph_size;
+
+        // Total atlas is 2x2 grid of quadrants (4 styles)
+        const width: u32 = quadrant_width * 2;
+        const height: u32 = quadrant_height * 2;
 
         return .{ width, height };
     }

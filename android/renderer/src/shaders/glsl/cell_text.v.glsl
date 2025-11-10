@@ -21,6 +21,9 @@ layout(location = 5) in uint atlas;
 // Misc glyph properties.
 layout(location = 6) in uint glyph_bools;
 
+// Text attributes (bold, italic, underline, etc.)
+layout(location = 7) in uint glyph_attributes;
+
 // Values `atlas` can take.
 const uint ATLAS_GRAYSCALE = 0u;
 const uint ATLAS_COLOR = 1u;
@@ -29,11 +32,25 @@ const uint ATLAS_COLOR = 1u;
 const uint NO_MIN_CONTRAST = 1u;
 const uint IS_CURSOR_GLYPH = 2u;
 
+// Masks for the `glyph_attributes` attribute (packed struct u16)
+const uint ATTR_BOLD = 1u;
+const uint ATTR_ITALIC = 2u;
+const uint ATTR_DIM = 4u;
+const uint ATTR_STRIKETHROUGH = 8u;
+const uint ATTR_UNDERLINE_MASK = 112u; // bits 4-6 (3 bits for underline enum)
+const uint ATTR_UNDERLINE_SHIFT = 4u;
+const uint ATTR_INVERSE = 128u;
+
 // Output variables (individual variables instead of interface block for ES compatibility)
 flat out uint out_atlas;
 flat out vec4 out_color;
 flat out vec4 out_bg_color;
 out vec2 out_tex_coord; // Pixel coordinates - will be normalized in fragment shader
+flat out uint out_attributes; // Text attributes for fragment shader
+out vec2 out_cell_coord; // Position within cell (0.0-1.0) for underline/strikethrough
+flat out vec4 out_glyph_bounds; // Glyph bounds within cell (x_start, y_start, x_end, y_end) in 0.0-1.0
+flat out uvec2 out_glyph_pos; // Glyph position in atlas (for texture coordinate calculation)
+flat out uvec2 out_glyph_size; // Glyph size in atlas (for texture coordinate calculation)
 
 // NOTE: SSBOs are not supported in vertex shaders on Mali-G57 (max = 0)
 // We'll use the global background color instead of per-cell colors for now
@@ -71,6 +88,8 @@ void main() {
     corner.y = float(vid == 2 || vid == 3);
 
     out_atlas = atlas;
+    out_glyph_pos = glyph_pos;
+    out_glyph_size = glyph_size;
 
     //              === Grid Cell ===
     //      +X
@@ -98,20 +117,50 @@ void main() {
     // the y offset. The X bearing is the distance from the left of the cell
     // to the left of the glyph, so it works as the x offset directly.
 
+    // Check if we need to expand quad to full cell for decorations
+    uint underline_type = (glyph_attributes & ATTR_UNDERLINE_MASK) >> ATTR_UNDERLINE_SHIFT;
+    bool has_underline = underline_type != 0u;
+    bool has_strikethrough = (glyph_attributes & ATTR_STRIKETHROUGH) != 0u;
+    bool has_inverse = (glyph_attributes & ATTR_INVERSE) != 0u;
+    bool expand_to_cell = has_underline || has_strikethrough || has_inverse;
+
     vec2 size = vec2(glyph_size);
     vec2 offset = vec2(bearings);
-
     offset.y = cell_size.y - offset.y;
 
-    // Calculate the final position of the cell which uses our glyph size
-    // and glyph offset to create the correct bounding box for the glyph.
+    // For underline, strikethrough, or inverse video, expand quad to cover entire cell
+    if (expand_to_cell) {
+        // Store original glyph info (offset already has the correct position)
+        vec2 glyph_size_vec = size;
+        vec2 glyph_offset = offset; // This is already the top-left corner of the glyph
+
+        // Calculate glyph bounds within cell (0.0-1.0 coordinates)
+        // offset is already the correct top-left position of the glyph
+        vec2 glyph_start = glyph_offset / cell_size;
+        vec2 glyph_end = (glyph_offset + glyph_size_vec) / cell_size;
+        out_glyph_bounds = vec4(glyph_start.x, glyph_start.y, glyph_end.x, glyph_end.y);
+
+        // Expand size to full cell
+        size = cell_size;
+        offset = vec2(0.0, 0.0);
+
+        // Don't set out_tex_coord here - it will be calculated in fragment shader
+        // based on position within glyph bounds
+        out_tex_coord = vec2(0.0); // Unused for expanded quads
+
+        // Cell coord is the corner position in cell space
+        out_cell_coord = corner;
+    } else {
+        // Normal glyph rendering - quad sized to glyph
+        // No need for bounds check, glyph fills entire quad
+        out_glyph_bounds = vec4(0.0, 0.0, 1.0, 1.0);
+        out_tex_coord = vec2(glyph_pos) + vec2(glyph_size) * corner;
+        out_cell_coord = corner;
+    }
+
+    // Calculate the final position of the cell
     cell_pos = cell_pos + size * corner + offset;
     gl_Position = projection_matrix * vec4(cell_pos.x, cell_pos.y, 0.0, 1.0);
-
-    // Calculate the texture coordinate in pixels. This is NOT normalized
-    // (between 0.0 and 1.0), and does not need to be, since it will be
-    // normalized in the fragment shader using texture size.
-    out_tex_coord = vec2(glyph_pos) + vec2(glyph_size) * corner;
 
     // Get our color. We always fetch a linearized version to
     // make it easier to handle minimum contrast calculations.
@@ -137,4 +186,7 @@ void main() {
     if ((glyph_bools & IS_CURSOR_GLYPH) == 0u && is_cursor_pos) {
         out_color = load_color(unpack4u8(cursor_color_packed_4u8), use_linear_blending);
     }
+
+    // Pass attributes to fragment shader
+    out_attributes = glyph_attributes;
 }
