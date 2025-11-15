@@ -47,14 +47,10 @@ pkgs.mkShell {
     curl
     wget
 
-    # Shell
-    zsh
-
     # Zig will be installed separately via download
   ];
 
   shellHook = ''
-    # Switch to zsh
     # Set JAVA_HOME for Gradle
     export JAVA_HOME="${pkgs.jdk17}"
 
@@ -82,6 +78,12 @@ pkgs.mkShell {
     echo "  make build-native  - Build libghostty for all Android targets"
     echo "  make clean         - Clean build artifacts"
     echo ""
+
+    # Switch to zsh only in interactive sessions
+    if [ -t 0 ] && [ -z "$IN_NIX_SHELL_ZSH" ]; then
+      export IN_NIX_SHELL_ZSH=1
+      exec zsh -l
+    fi
   '';
 
   # Environment variables for Android builds
