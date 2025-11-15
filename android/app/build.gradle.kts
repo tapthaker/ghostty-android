@@ -110,6 +110,7 @@ tasks.register<Exec>("buildNativeLibs") {
     // Configure inputs - track source files
     inputs.files(fileTree("../../android/renderer/src") {
         include("**/*.zig")
+        include("**/*.glsl")
     })
     inputs.files(fileTree("../../libghostty-vt") {
         include("**/*.zig")
@@ -128,6 +129,18 @@ tasks.register<Exec>("buildNativeLibs") {
     environment("ANDROID_HOME", System.getenv("ANDROID_HOME") ?: "/home/tapan/Android/Sdk")
     environment("ANDROID_NDK_ROOT", System.getenv("ANDROID_NDK_ROOT") ?:
         "${System.getenv("ANDROID_HOME") ?: "/home/tapan/Android/Sdk"}/ndk/29.0.14206865")
+
+    // For debug builds, only build for arm64-v8a to speed up iteration
+    // Check if we're building debug variant
+    val isDebug = gradle.startParameter.taskNames.any {
+        it.contains("Debug", ignoreCase = true) || it.contains("assembleDebug", ignoreCase = true)
+    }
+    if (isDebug) {
+        environment("ANDROID_ABIS", "arm64-v8a")
+        println("Building native libs for DEBUG: arm64-v8a only")
+    } else {
+        println("Building native libs for RELEASE: all ABIs")
+    }
 }
 
 // Run native build before preBuild
