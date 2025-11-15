@@ -34,16 +34,16 @@ COLOR_RED = \033[31m
 check-nix-shell:
 	@if [ -z "$(IN_NIX_SHELL)" ] && [ -z "$(ANDROID_HOME)" ]; then \
 		echo ""; \
-		echo "$(COLOR_RED)╔══════════════════════════════════════════════════════════════╗$(COLOR_RESET)"; \
-		echo "$(COLOR_RED)║  ERROR: Not running inside nix-shell                        ║$(COLOR_RESET)"; \
-		echo "$(COLOR_RED)╚══════════════════════════════════════════════════════════════╝$(COLOR_RESET)"; \
+		echo -e "$(COLOR_RED)╔══════════════════════════════════════════════════════════════╗$(COLOR_RESET)"; \
+		echo -e "$(COLOR_RED)║  ERROR: Not running inside nix-shell                        ║$(COLOR_RESET)"; \
+		echo -e "$(COLOR_RED)╚══════════════════════════════════════════════════════════════╝$(COLOR_RESET)"; \
 		echo ""; \
-		echo "$(COLOR_YELLOW)All build commands must be run within nix-shell.$(COLOR_RESET)"; \
+		echo -e "$(COLOR_YELLOW)All build commands must be run within nix-shell.$(COLOR_RESET)"; \
 		echo ""; \
-		echo "$(COLOR_BOLD)To enter nix-shell, run:$(COLOR_RESET)"; \
+		echo -e "$(COLOR_BOLD)To enter nix-shell, run:$(COLOR_RESET)"; \
 		echo "  $$ nix-shell"; \
 		echo ""; \
-		echo "$(COLOR_BOLD)Then run your make command:$(COLOR_RESET)"; \
+		echo -e "$(COLOR_BOLD)Then run your make command:$(COLOR_RESET)"; \
 		echo "  [nix-shell] $$ make $(filter-out check-nix-shell,$(MAKECMDGOALS))"; \
 		echo ""; \
 		exit 1; \
@@ -51,32 +51,32 @@ check-nix-shell:
 
 ## help: Show this help message
 help:
-	@echo "$(COLOR_BOLD)Ghostty Android Build System$(COLOR_RESET)"
+	@echo -e "$(COLOR_BOLD)Ghostty Android Build System$(COLOR_RESET)"
 	@echo ""
-	@echo "$(COLOR_YELLOW)⚠️  IMPORTANT: All commands must be run inside nix-shell$(COLOR_RESET)"
-	@echo "$(COLOR_YELLOW)   First run: nix-shell$(COLOR_RESET)"
+	@echo -e "$(COLOR_YELLOW)⚠️  IMPORTANT: All commands must be run inside nix-shell$(COLOR_RESET)"
+	@echo -e "$(COLOR_YELLOW)   First run: nix-shell$(COLOR_RESET)"
 	@echo ""
-	@echo "$(COLOR_GREEN)Available targets:$(COLOR_RESET)"
-	@echo "  $(COLOR_BOLD)make android-studio$(COLOR_RESET) - Open Android Studio (NixOS recommended method)"
-	@echo "  $(COLOR_BOLD)make android$(COLOR_RESET)        - Build everything and install to device"
-	@echo "  $(COLOR_BOLD)make setup$(COLOR_RESET)          - Clone Ghostty submodule and setup project"
-	@echo "  $(COLOR_BOLD)make check-env$(COLOR_RESET)      - Check required environment variables"
-	@echo "  $(COLOR_BOLD)make build-native$(COLOR_RESET)   - Build libghostty-vt + renderer for all Android ABIs"
-	@echo "  $(COLOR_BOLD)make build-android$(COLOR_RESET)  - Build the Android app (after build-native)"
-	@echo "  $(COLOR_BOLD)make install$(COLOR_RESET)        - Install APK to connected device"
-	@echo "  $(COLOR_BOLD)make logs$(COLOR_RESET)           - Show filtered adb logs for Ghostty app"
+	@echo -e "$(COLOR_GREEN)Available targets:$(COLOR_RESET)"
+	@echo -e "  $(COLOR_BOLD)make android-studio$(COLOR_RESET) - Open Android Studio (NixOS recommended method)"
+	@echo -e "  $(COLOR_BOLD)make android$(COLOR_RESET)        - Build everything and install to device"
+	@echo -e "  $(COLOR_BOLD)make setup$(COLOR_RESET)          - Clone Ghostty submodule and setup project"
+	@echo -e "  $(COLOR_BOLD)make check-env$(COLOR_RESET)      - Check required environment variables"
+	@echo -e "  $(COLOR_BOLD)make build-native$(COLOR_RESET)   - Build libghostty-vt + renderer for all Android ABIs"
+	@echo -e "  $(COLOR_BOLD)make build-android$(COLOR_RESET)  - Build the Android app (after build-native)"
+	@echo -e "  $(COLOR_BOLD)make install$(COLOR_RESET)        - Install APK to connected device"
+	@echo -e "  $(COLOR_BOLD)make logs$(COLOR_RESET)           - Show filtered adb logs for Ghostty app"
 	@echo ""
-	@echo "$(COLOR_GREEN)Testing:$(COLOR_RESET)"
-	@echo "  $(COLOR_BOLD)make test-feedback$(COLOR_RESET)      - Run all feedback loop tests (interactive)"
-	@echo "  $(COLOR_BOLD)make test-feedback-list$(COLOR_RESET) - List all available test IDs"
-	@echo "  $(COLOR_BOLD)make test-feedback-id$(COLOR_RESET)   - Run specific test (e.g., TEST_ID=text_attributes)"
-	@echo "  $(COLOR_BOLD)make test-feedback-from$(COLOR_RESET) - Run tests starting from ID (e.g., FROM=256_colors)"
+	@echo -e "$(COLOR_GREEN)Testing:$(COLOR_RESET)"
+	@echo -e "  $(COLOR_BOLD)make test-feedback$(COLOR_RESET)      - Run all feedback loop tests (interactive)"
+	@echo -e "  $(COLOR_BOLD)make test-feedback-list$(COLOR_RESET) - List all available test IDs"
+	@echo -e "  $(COLOR_BOLD)make test-feedback-id$(COLOR_RESET)   - Run specific test (e.g., TEST_ID=text_attributes)"
+	@echo -e "  $(COLOR_BOLD)make test-feedback-from$(COLOR_RESET) - Run tests starting from ID (e.g., FROM=256_colors)"
 	@echo ""
-	@echo "$(COLOR_GREEN)Maintenance:$(COLOR_RESET)"
-	@echo "  $(COLOR_BOLD)make clean$(COLOR_RESET)          - Clean build artifacts"
-	@echo "  $(COLOR_BOLD)make clean-all$(COLOR_RESET)      - Clean everything including Ghostty"
+	@echo -e "$(COLOR_GREEN)Maintenance:$(COLOR_RESET)"
+	@echo -e "  $(COLOR_BOLD)make clean$(COLOR_RESET)          - Clean build artifacts"
+	@echo -e "  $(COLOR_BOLD)make clean-all$(COLOR_RESET)      - Clean everything including Ghostty"
 	@echo ""
-	@echo "$(COLOR_YELLOW)Configuration:$(COLOR_RESET)"
+	@echo -e "$(COLOR_YELLOW)Configuration:$(COLOR_RESET)"
 	@echo "  ANDROID_HOME:       $(ANDROID_HOME)"
 	@echo "  ANDROID_NDK_ROOT:   $(ANDROID_NDK_ROOT)"
 	@echo "  ANDROID_TARGET_API: $(ANDROID_TARGET_API)"
@@ -85,42 +85,42 @@ help:
 
 ## check-env: Verify environment variables are set
 check-env: check-nix-shell
-	@echo "$(COLOR_BLUE)Checking environment...$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Checking environment...$(COLOR_RESET)"
 	@if [ -z "$(ANDROID_HOME)" ]; then \
-		echo "$(COLOR_YELLOW)⚠️  ANDROID_HOME not set$(COLOR_RESET)"; \
+		echo -e "$(COLOR_YELLOW)⚠️  ANDROID_HOME not set$(COLOR_RESET)"; \
 		exit 1; \
 	fi
 	@if [ -z "$(ANDROID_NDK_ROOT)" ]; then \
-		echo "$(COLOR_YELLOW)⚠️  ANDROID_NDK_ROOT not set$(COLOR_RESET)"; \
+		echo -e "$(COLOR_YELLOW)⚠️  ANDROID_NDK_ROOT not set$(COLOR_RESET)"; \
 		exit 1; \
 	fi
-	@echo "$(COLOR_GREEN)✓ Environment configured correctly$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)✓ Environment configured correctly$(COLOR_RESET)"
 	@echo "  Note: Zig 0.15.2 will be provided by Ghostty's nix-shell during builds"
 
 ## setup: Initialize Ghostty submodule
 setup: check-nix-shell
-	@echo "$(COLOR_BLUE)Setting up Ghostty submodule...$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Setting up Ghostty submodule...$(COLOR_RESET)"
 	@if [ ! -d "$(GHOSTTY_DIR)/.git" ]; then \
-		echo "$(COLOR_YELLOW)Cloning Ghostty repository...$(COLOR_RESET)"; \
+		echo -e "$(COLOR_YELLOW)Cloning Ghostty repository...$(COLOR_RESET)"; \
 		git submodule add $(GHOSTTY_REPO) $(GHOSTTY_DIR) || \
 		(git submodule init && git submodule update); \
 	else \
-		echo "$(COLOR_GREEN)✓ Ghostty already cloned$(COLOR_RESET)"; \
+		echo -e "$(COLOR_GREEN)✓ Ghostty already cloned$(COLOR_RESET)"; \
 		git submodule update --init --recursive; \
 	fi
-	@echo "$(COLOR_GREEN)✓ Setup complete$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)✓ Setup complete$(COLOR_RESET)"
 
 ## build-native: Build libghostty-vt and renderer for Android targets
 build-native: check-env setup
-	@echo "$(COLOR_BLUE)Building libghostty-vt and renderer for Android...$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Building libghostty-vt and renderer for Android...$(COLOR_RESET)"
 	@mkdir -p $(BUILD_DIR)
 	@for abi in $(ANDROID_ABIS); do \
 		echo ""; \
-		echo "$(COLOR_BOLD)Building for $$abi...$(COLOR_RESET)"; \
+		echo -e "$(COLOR_BOLD)Building for $$abi...$(COLOR_RESET)"; \
 		$(MAKE) build-abi ABI=$$abi; \
 	done
 	@echo ""
-	@echo "$(COLOR_GREEN)✓ All Android targets built successfully$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)✓ All Android targets built successfully$(COLOR_RESET)"
 	@echo "Libraries are in: $(ANDROID_LIBS_DIR)/"
 
 ## build-abi: Build for specific ABI (internal target)
@@ -135,88 +135,88 @@ build-abi:
 
 ## android-studio: Open project in Android Studio (NixOS recommended)
 android-studio: check-nix-shell build-native
-	@echo "$(COLOR_BLUE)Opening Android Studio...$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Opening Android Studio...$(COLOR_RESET)"
 	@./scripts/build-with-studio.sh
 
 ## build-android: Build Android APK
 build-android: check-nix-shell
-	@echo "$(COLOR_BLUE)Building Android app...$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Building Android app...$(COLOR_RESET)"
 	@if [ ! -d "android/app" ]; then \
-		echo "$(COLOR_YELLOW)⚠️  Android project not initialized yet$(COLOR_RESET)"; \
+		echo -e "$(COLOR_YELLOW)⚠️  Android project not initialized yet$(COLOR_RESET)"; \
 		exit 1; \
 	fi
 	@./android/scripts/build-android.sh
-	@echo "$(COLOR_GREEN)✓ Android APK built$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)✓ Android APK built$(COLOR_RESET)"
 	@echo "APK location: android/app/build/outputs/apk/debug/app-debug.apk"
 
 ## android: Build native libraries, Android APK, install to device, and launch (one-stop command)
 android: check-nix-shell
 	@./android/scripts/build-android.sh --install
-	@echo "$(COLOR_YELLOW)Launching Ghostty...$(COLOR_RESET)"
+	@echo -e "$(COLOR_YELLOW)Launching Ghostty...$(COLOR_RESET)"
 	@adb shell am start -n com.ghostty.android/.MainActivity
 	@echo ""
-	@echo "$(COLOR_GREEN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(COLOR_RESET)"
-	@echo "$(COLOR_GREEN)✓ Ghostty Android built, installed, and launched successfully!$(COLOR_RESET)"
-	@echo "$(COLOR_GREEN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)✓ Ghostty Android built, installed, and launched successfully!$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(COLOR_RESET)"
 	@echo ""
-	@echo "$(COLOR_BOLD)Native Libraries:$(COLOR_RESET)"
+	@echo -e "$(COLOR_BOLD)Native Libraries:$(COLOR_RESET)"
 	@ls -lh $(ANDROID_LIBS_DIR)/*/*.so 2>/dev/null || echo "  (none found)"
 	@echo ""
-	@echo "$(COLOR_BOLD)APK Location:$(COLOR_RESET)"
+	@echo -e "$(COLOR_BOLD)APK Location:$(COLOR_RESET)"
 	@echo "  android/app/build/outputs/apk/debug/app-debug.apk"
 	@echo ""
-	@echo "$(COLOR_YELLOW)Run 'adb logcat | grep -E \"(GhosttyBridge|TerminalSession)\"' to view logs$(COLOR_RESET)"
+	@echo -e "$(COLOR_YELLOW)Run 'adb logcat | grep -E \"(GhosttyBridge|TerminalSession)\"' to view logs$(COLOR_RESET)"
 	@echo ""
 
 ## install: Install app to connected device
 install: check-nix-shell build-android
-	@echo "$(COLOR_BLUE)Installing to device...$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Installing to device...$(COLOR_RESET)"
 	cd android && ./gradlew installDebug
-	@echo "$(COLOR_GREEN)✓ App installed$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)✓ App installed$(COLOR_RESET)"
 
 ## logs: Show filtered adb logs for Ghostty app package
 logs: check-nix-shell
-	@echo "$(COLOR_BLUE)Showing logs for com.ghostty.android...$(COLOR_RESET)"
-	@echo "$(COLOR_YELLOW)Press Ctrl+C to stop$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Showing logs for com.ghostty.android...$(COLOR_RESET)"
+	@echo -e "$(COLOR_YELLOW)Press Ctrl+C to stop$(COLOR_RESET)"
 	@adb logcat --pid=$$(adb shell pidof -s com.ghostty.android) 2>/dev/null || \
-		(echo "$(COLOR_YELLOW)App not running, showing all logs with package filter...$(COLOR_RESET)" && \
+		(echo -e "$(COLOR_YELLOW)App not running, showing all logs with package filter...$(COLOR_RESET)" && \
 		adb logcat | grep --line-buffered "com.ghostty.android")
 
 ## test-feedback: Run all feedback loop tests (interactive)
 test-feedback: check-nix-shell
-	@echo "$(COLOR_BLUE)Running feedback loop tests (interactive)...$(COLOR_RESET)"
-	@echo "$(COLOR_YELLOW)Note: This will launch tests one at a time for manual verification$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Running feedback loop tests (interactive)...$(COLOR_RESET)"
+	@echo -e "$(COLOR_YELLOW)Note: This will launch tests one at a time for manual verification$(COLOR_RESET)"
 	@python3 test_feedback_loop.py
 
 ## test-feedback-list: List all available test IDs
 test-feedback-list:
-	@echo "$(COLOR_BOLD)Available Test IDs:$(COLOR_RESET)"
+	@echo -e "$(COLOR_BOLD)Available Test IDs:$(COLOR_RESET)"
 	@echo ""
-	@echo "$(COLOR_GREEN)Basic Colors:$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)Basic Colors:$(COLOR_RESET)"
 	@echo "  - basic_colors_fg"
 	@echo "  - basic_colors_bg"
 	@echo "  - 256_colors"
 	@echo "  - rgb_colors"
 	@echo ""
-	@echo "$(COLOR_GREEN)Text Attributes:$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)Text Attributes:$(COLOR_RESET)"
 	@echo "  - text_attributes"
 	@echo "  - combined_attributes"
 	@echo ""
-	@echo "$(COLOR_GREEN)Cursor & Movement:$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)Cursor & Movement:$(COLOR_RESET)"
 	@echo "  - cursor_position"
 	@echo "  - cursor_movement"
 	@echo ""
-	@echo "$(COLOR_GREEN)Screen Operations:$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)Screen Operations:$(COLOR_RESET)"
 	@echo "  - screen_clear"
 	@echo "  - line_operations"
 	@echo "  - scrollback"
 	@echo ""
-	@echo "$(COLOR_GREEN)Line Wrapping:$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)Line Wrapping:$(COLOR_RESET)"
 	@echo "  - line_wrap_basic"
 	@echo "  - line_wrap_word_boundary"
 	@echo "  - line_wrap_ansi_colors"
 	@echo ""
-	@echo "$(COLOR_GREEN)Unicode & Special Characters:$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)Unicode & Special Characters:$(COLOR_RESET)"
 	@echo "  - utf8_basic"
 	@echo "  - emoji"
 	@echo "  - box_drawing"
@@ -224,32 +224,32 @@ test-feedback-list:
 	@echo "  - double_width"
 	@echo "  - combining_chars"
 	@echo ""
-	@echo "$(COLOR_YELLOW)Usage:$(COLOR_RESET)"
+	@echo -e "$(COLOR_YELLOW)Usage:$(COLOR_RESET)"
 	@echo "  make test-feedback-id TEST_ID=text_attributes"
 	@echo "  make test-feedback-from FROM=256_colors"
 
 ## test-feedback-id: Run a specific test by ID
 test-feedback-id: check-nix-shell
 	@if [ -z "$(TEST_ID)" ]; then \
-		echo "$(COLOR_YELLOW)Error: TEST_ID not specified$(COLOR_RESET)"; \
+		echo -e "$(COLOR_YELLOW)Error: TEST_ID not specified$(COLOR_RESET)"; \
 		echo "Usage: make test-feedback-id TEST_ID=text_attributes"; \
 		echo ""; \
 		echo "Run 'make test-feedback-list' to see all available test IDs"; \
 		exit 1; \
 	fi
-	@echo "$(COLOR_BLUE)Running test: $(TEST_ID)$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Running test: $(TEST_ID)$(COLOR_RESET)"
 	@python3 test_feedback_loop.py --test-id $(TEST_ID)
 
 ## test-feedback-from: Run tests starting from a specific test ID
 test-feedback-from: check-nix-shell
 	@if [ -z "$(FROM)" ]; then \
-		echo "$(COLOR_YELLOW)Error: FROM not specified$(COLOR_RESET)"; \
+		echo -e "$(COLOR_YELLOW)Error: FROM not specified$(COLOR_RESET)"; \
 		echo "Usage: make test-feedback-from FROM=256_colors"; \
 		echo ""; \
 		echo "Run 'make test-feedback-list' to see all available test IDs"; \
 		exit 1; \
 	fi
-	@echo "$(COLOR_BLUE)Running tests starting from: $(FROM)$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Running tests starting from: $(FROM)$(COLOR_RESET)"
 	@python3 test_feedback_loop.py --start-from $(FROM)
 
 ## test: Alias for test-feedback (for convenience)
@@ -260,7 +260,7 @@ test-list: test-feedback-list
 
 ## clean: Clean build artifacts
 clean:
-	@echo "$(COLOR_BLUE)Cleaning build artifacts...$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Cleaning build artifacts...$(COLOR_RESET)"
 	rm -rf $(BUILD_DIR)
 	rm -rf $(ANDROID_LIBS_DIR)
 	@if [ -d "android" ]; then \
@@ -269,31 +269,31 @@ clean:
 	@if [ -d "$(GHOSTTY_DIR)/zig-out" ]; then \
 		rm -rf $(GHOSTTY_DIR)/zig-out; \
 	fi
-	@echo "$(COLOR_GREEN)✓ Clean complete$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)✓ Clean complete$(COLOR_RESET)"
 
 ## clean-all: Clean everything including Ghostty
 clean-all: clean
-	@echo "$(COLOR_BLUE)Removing Ghostty submodule...$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Removing Ghostty submodule...$(COLOR_RESET)"
 	@if [ -d "$(GHOSTTY_DIR)" ]; then \
 		git submodule deinit -f $(GHOSTTY_DIR); \
 		rm -rf $(GHOSTTY_DIR); \
 		git rm -f $(GHOSTTY_DIR) 2>/dev/null || true; \
 	fi
-	@echo "$(COLOR_GREEN)✓ Full clean complete$(COLOR_RESET)"
+	@echo -e "$(COLOR_GREEN)✓ Full clean complete$(COLOR_RESET)"
 
 ## test-zig: Test Zig compilation without Android
 test-zig:
-	@echo "$(COLOR_BLUE)Testing Zig build...$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Testing Zig build...$(COLOR_RESET)"
 	@if [ -d "$(GHOSTTY_DIR)" ]; then \
 		cd $(GHOSTTY_DIR) && nix-shell --run "zig build lib-vt -Doptimize=ReleaseFast"; \
-		echo "$(COLOR_GREEN)✓ Zig build test passed$(COLOR_RESET)"; \
+		echo -e "$(COLOR_GREEN)✓ Zig build test passed$(COLOR_RESET)"; \
 	else \
-		echo "$(COLOR_YELLOW)⚠️  Run 'make setup' first$(COLOR_RESET)"; \
+		echo -e "$(COLOR_YELLOW)⚠️  Run 'make setup' first$(COLOR_RESET)"; \
 	fi
 
 ## info: Show build information
 info:
-	@echo "$(COLOR_BOLD)Build Information$(COLOR_RESET)"
+	@echo -e "$(COLOR_BOLD)Build Information$(COLOR_RESET)"
 	@echo ""
 	@echo "Project: Ghostty Android"
 	@echo "Build directory: $(BUILD_DIR)"
