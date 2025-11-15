@@ -118,11 +118,12 @@ void main() {
     // to the left of the glyph, so it works as the x offset directly.
 
     // Check if we need to expand quad to full cell for decorations
-    uint underline_type = (glyph_attributes & ATTR_UNDERLINE_MASK) >> ATTR_UNDERLINE_SHIFT;
-    bool has_underline = underline_type != 0u;
-    bool has_strikethrough = (glyph_attributes & ATTR_STRIKETHROUGH) != 0u;
-    bool has_inverse = (glyph_attributes & ATTR_INVERSE) != 0u;
-    bool expand_to_cell = has_underline || has_strikethrough || has_inverse;
+    // TESTING: Disable underline, strikethrough, and inverse - no quad expansion needed
+    uint underline_type = 0u; // (glyph_attributes & ATTR_UNDERLINE_MASK) >> ATTR_UNDERLINE_SHIFT;
+    bool has_underline = false; // underline_type != 0u;
+    bool has_strikethrough = false; // (glyph_attributes & ATTR_STRIKETHROUGH) != 0u;
+    bool has_inverse = false; // (glyph_attributes & ATTR_INVERSE) != 0u;
+    bool expand_to_cell = false; // has_underline || has_strikethrough || has_inverse;
 
     vec2 size = vec2(glyph_size);
     vec2 offset = vec2(bearings);

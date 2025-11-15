@@ -228,8 +228,10 @@ void main() {
 
     // Apply remaining text attributes
     bool is_dim = (out_attributes & ATTR_DIM) != 0u;
-    bool is_strikethrough = (out_attributes & ATTR_STRIKETHROUGH) != 0u;
-    uint underline_type = (out_attributes & ATTR_UNDERLINE_MASK) >> ATTR_UNDERLINE_SHIFT;
+    // TESTING: Disable strikethrough
+    bool is_strikethrough = false; // (out_attributes & ATTR_STRIKETHROUGH) != 0u;
+    // TESTING: Disable underline
+    uint underline_type = 0u; // (out_attributes & ATTR_UNDERLINE_MASK) >> ATTR_UNDERLINE_SHIFT;
 
     // Apply dim (reduce brightness by 50%)
     if (is_dim) {
@@ -241,8 +243,8 @@ void main() {
 
     // Check if we should draw underline or strikethrough
     // TESTING: Disable ALL decorations (underline, strikethrough, reverse video)
-    bool draw_underline = isUnderline(underline_type, out_cell_coord);
-    bool draw_strikethrough = is_strikethrough && isStrikethrough(out_cell_coord);
+    bool draw_underline = false; // isUnderline(underline_type, out_cell_coord);
+    bool draw_strikethrough = false; // is_strikethrough && isStrikethrough(out_cell_coord);
 
     // Draw underline or strikethrough by setting full opacity at those pixels
     if (draw_underline || draw_strikethrough) {
