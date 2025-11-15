@@ -79,10 +79,10 @@ pkgs.mkShell {
     echo "  make clean         - Clean build artifacts"
     echo ""
 
-    # Switch to zsh only in interactive sessions
+    # Switch to zsh for interactive sessions (zsh-nix-shell plugin handles integration)
     if [ -t 0 ] && [ -z "$IN_NIX_SHELL_ZSH" ]; then
       export IN_NIX_SHELL_ZSH=1
-      exec zsh -l
+      exec zsh
     fi
   '';
 
