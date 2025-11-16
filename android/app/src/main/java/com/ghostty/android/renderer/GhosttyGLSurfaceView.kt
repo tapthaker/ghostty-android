@@ -64,8 +64,8 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         // This is needed because GLSurfaceView renders in a separate window by default
         setZOrderOnTop(true)
 
-        // Create and set the renderer
-        renderer = GhosttyRenderer()
+        // Create and set the renderer (pass context for DPI access)
+        renderer = GhosttyRenderer(context)
         setRenderer(renderer)
 
         // Set render mode to continuously for proof of concept

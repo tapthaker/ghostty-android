@@ -10,6 +10,7 @@ const Texture = @import("texture.zig");
 const shaders = @import("shaders.zig");
 const shader_module = @import("shader.zig");
 const FontSystem = @import("font_system.zig").FontSystem;
+const font_metrics = @import("font_metrics.zig");
 const TerminalManager = @import("terminal_manager.zig");
 const screen_extractor = @import("screen_extractor.zig");
 
@@ -29,6 +30,9 @@ terminal_manager: TerminalManager,
 /// Surface dimensions in pixels
 width: u32 = 0,
 height: u32 = 0,
+
+/// Screen DPI (dots per inch) from Android
+dpi: u16 = 160, // Default to mdpi baseline
 
 /// Grid dimensions (terminal columns x rows)
 grid_cols: u16 = 80,
@@ -68,7 +72,7 @@ cell_text_pipeline: Pipeline,
 num_test_glyphs: u32 = 0,
 
 /// Initialize the renderer with optional initial dimensions
-pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) !Self {
+pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Self {
     log.info("Initializing renderer with dimensions: {d}x{d}", .{ width, height });
 
     // Load and compile bg_color shaders
@@ -106,39 +110,20 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) !Self {
     // Note: We use binding 0 for UBO since binding 1 is used for SSBO
     uniforms_buffer.bindBase(0);
 
-    // Define desired grid size (standard terminal dimensions)
-    const desired_cols: u32 = 80;
-    const desired_rows: u32 = 24;
-
-    // Calculate cell size from screen dimensions and desired grid
-    // If screen dimensions are provided, calculate cell size to fit the grid
-    const cell_width: u32 = if (width > 0)
-        width / desired_cols
-    else
-        10; // Default cell width if no screen size
-
-    const cell_height: u32 = if (height > 0)
-        height / desired_rows
-    else
-        20; // Default cell height if no screen size
-
-    log.info("Calculated cell size: {d}x{d} for grid {d}x{d} on screen {d}x{d}", .{
-        cell_width, cell_height, desired_cols, desired_rows, width, height
-    });
-
-    // Initialize font system with calculated cell dimensions
-    var font_system = try FontSystem.initWithCellSize(allocator, cell_width, cell_height);
+    // Initialize font system with default font size
+    // Start with a default font size of 20pt and let the font system calculate proper cell dimensions
+    var font_system = try FontSystem.initDefault(allocator, dpi);
     errdefer font_system.deinit();
 
-    log.info("Font system initialized", .{});
+    log.info("Font system initialized with default 20pt font", .{});
 
-    // Verify the actual cell size matches what we requested
+    // Get the actual cell size from the font system
     const actual_cell_size = font_system.getCellSize();
-    const actual_cell_width = @as(u32, @intFromFloat(actual_cell_size[0]));
-    const actual_cell_height = @as(u32, @intFromFloat(actual_cell_size[1]));
+    const cell_width = @as(u32, @intFromFloat(actual_cell_size[0]));
+    const cell_height = @as(u32, @intFromFloat(actual_cell_size[1]));
 
-    log.info("Font system cell size: requested={d}x{d}, actual={d}x{d}", .{
-        cell_width, cell_height, actual_cell_width, actual_cell_height
+    log.info("Font system cell size: {d}x{d} (from 20pt font at {d} DPI)", .{
+        cell_width, cell_height, dpi
     });
 
     // Calculate viewport padding needed to prevent glyph clipping
@@ -146,9 +131,17 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) !Self {
     const padding = font_system.getViewportPadding();
     log.info("Viewport padding: right={d}px, bottom={d}px", .{ padding.right, padding.bottom });
 
-    // Use the desired grid dimensions directly
-    const initial_grid_cols: u32 = desired_cols;
-    const initial_grid_rows: u32 = desired_rows;
+    // Calculate grid dimensions based on screen size and font-derived cell size
+    const grid = font_metrics.GridCalculator.calculate(
+        if (width > 0) width else 800,  // Default width if not set
+        if (height > 0) height else 600, // Default height if not set
+        cell_width,
+        cell_height,
+        80,  // min_cols (VT100 standard)
+        24   // min_rows (VT100 standard)
+    );
+    const initial_grid_cols = grid.cols;
+    const initial_grid_rows = grid.rows;
 
     log.info("Calculated terminal grid: {d}x{d} (cell size: {d}x{d})", .{
         initial_grid_cols,
@@ -344,6 +337,7 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) !Self {
         .terminal_manager = terminal_manager,
         .width = if (width > 0) width else 0,
         .height = if (height > 0) height else 0,
+        .dpi = dpi,
         .grid_cols = @intCast(initial_grid_cols),
         .grid_rows = @intCast(initial_grid_rows),
         .uniforms_buffer = uniforms_buffer,
@@ -413,9 +407,17 @@ pub fn resize(self: *Self, width: u32, height: u32) !void {
     const cell_width = @as(u32, @intFromFloat(self.uniforms.cell_size[0]));
     const cell_height = @as(u32, @intFromFloat(self.uniforms.cell_size[1]));
 
-    // Calculate grid using FULL viewport (no padding subtraction)
-    const new_cols: u16 = @intCast(@min(width / cell_width, 512));
-    const new_rows: u16 = @intCast(@min(height / cell_height, 512));
+    // Use GridCalculator for proper grid dimension calculation
+    const grid = font_metrics.GridCalculator.calculate(
+        width,
+        height,
+        cell_width,
+        cell_height,
+        80,  // min_cols (VT100 standard)
+        24   // min_rows (VT100 standard)
+    );
+    const new_cols = grid.cols;
+    const new_rows = grid.rows;
 
     // Only resize terminal if dimensions actually changed
     if (new_cols != self.grid_cols or new_rows != self.grid_rows) {
@@ -521,10 +523,12 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
     self.font_system.deinit();
 
     // 2. Create new font system with new size
-    self.font_system = try FontSystem.init(self.allocator, new_font_size);
+    // Convert pixels to points using the stored DPI
+    const font_size_pts = (@as(f32, @floatFromInt(new_font_size)) * 72.0) / @as(f32, @floatFromInt(self.dpi));
+    self.font_system = try FontSystem.init(self.allocator, font_size_pts, self.dpi);
     errdefer self.font_system.deinit();
 
-    log.info("New font system initialized with size {d}px", .{new_font_size});
+    log.info("New font system initialized with size {d:.1}pt ({d}px) at {d} DPI", .{ font_size_pts, new_font_size, self.dpi });
 
     // 3. Get new atlas dimensions
     const font_atlas_dims = self.font_system.getAtlasDimensions();

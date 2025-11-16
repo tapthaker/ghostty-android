@@ -169,17 +169,18 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceCreat
 }
 
 /// Called when OpenGL surface size changes
-/// Java signature: void nativeOnSurfaceChanged(int width, int height)
+/// Java signature: void nativeOnSurfaceChanged(int width, int height, int dpi)
 export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceChanged(
     env: *c.JNIEnv,
     obj: c.jobject,
     width: c.jint,
     height: c.jint,
+    dpi: c.jint,
 ) void {
     _ = env;
     _ = obj;
 
-    log.info("nativeOnSurfaceChanged: {d}x{d}", .{ width, height });
+    log.info("nativeOnSurfaceChanged: {d}x{d} at {d} DPI", .{ width, height, dpi });
 
     // Note: glViewport will be set by the renderer to match the expanded projection matrix
     // This ensures viewport and projection dimensions are in sync to avoid GL errors
@@ -189,10 +190,10 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceChang
 
     // Initialize renderer on first surface change (now we have real dimensions!)
     if (!renderer_state.initialized) {
-        log.info("Initializing renderer with actual surface dimensions: {d}x{d}", .{ width, height });
+        log.info("Initializing renderer with actual surface dimensions: {d}x{d} at {d} DPI", .{ width, height, dpi });
 
         const allocator = gpa.allocator();
-        renderer_state.renderer = Renderer.init(allocator, @intCast(width), @intCast(height)) catch |err| {
+        renderer_state.renderer = Renderer.init(allocator, @intCast(width), @intCast(height), @intCast(dpi)) catch |err| {
             log.err("Failed to initialize renderer: {}", .{err});
             return;
         };

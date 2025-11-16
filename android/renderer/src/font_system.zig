@@ -8,6 +8,7 @@ const std = @import("std");
 const freetype = @import("freetype");
 const shaders = @import("shaders.zig");
 const embedded_fonts = @import("embedded_fonts.zig");
+const font_metrics = @import("font_metrics.zig");
 const c = @cImport({
     @cInclude("android/log.h");
 });
@@ -40,7 +41,13 @@ pub const FontSystem = struct {
     face_italic: freetype.Face,
     face_bold_italic: freetype.Face,
 
-    /// Font metrics
+    /// Font size configuration
+    font_size: font_metrics.FontSize,
+
+    /// Extracted font metrics
+    metrics: font_metrics.FontMetrics,
+
+    /// Calculated cell dimensions
     cell_width: u32,
     cell_height: u32,
     baseline: i32,
@@ -86,18 +93,24 @@ pub const FontSystem = struct {
 
     /// Initialize font system with desired cell dimensions
     /// This calculates the appropriate font size to fit within the given cell size
-    pub fn initWithCellSize(allocator: std.mem.Allocator, desired_cell_width: u32, desired_cell_height: u32) !FontSystem {
-        // Calculate font size from cell height (accounting for line spacing)
-        // We use cell_height / 1.2 since we add 20% line height
-        const font_size_px = (desired_cell_height * 100) / 120; // Reverse of: cell_height = font_size * 1.2
+    pub fn initWithCellSize(allocator: std.mem.Allocator, desired_cell_width: u32, desired_cell_height: u32, dpi: u16) !FontSystem {
+        // Calculate font size needed for desired cell dimensions
+        // Use GridCalculator to estimate the font size
+        const font_size = font_metrics.GridCalculator.fontSizeForGrid(
+            desired_cell_width * 80, // Assume 80 columns for calculation
+            desired_cell_height * 24, // Assume 24 rows for calculation
+            80,
+            24,
+            dpi
+        );
 
-        log.info("Initializing font system for cell size {d}x{d}, computed font size: {d}px", .{
-            desired_cell_width, desired_cell_height, font_size_px
+        log.info("Initializing font system for cell size {d}x{d}, computed font size: {d:.1}pt at {d} DPI", .{
+            desired_cell_width, desired_cell_height, font_size.points, dpi
         });
 
-        var font_sys = try initWithFontSize(allocator, font_size_px);
+        var font_sys = try initWithFontSize(allocator, font_size);
 
-        // Override the calculated cell width with the requested width
+        // Override the calculated cell dimensions with the requested dimensions
         // This ensures we fit exactly in the grid
         font_sys.cell_width = desired_cell_width;
         font_sys.cell_height = desired_cell_height;
@@ -107,13 +120,24 @@ pub const FontSystem = struct {
         return font_sys;
     }
 
-    /// Initialize font system with specific font size (legacy method)
-    pub fn init(allocator: std.mem.Allocator, font_size_px: u32) !FontSystem {
-        return try initWithFontSize(allocator, font_size_px);
+    /// Initialize font system with specific font size in points
+    pub fn init(allocator: std.mem.Allocator, font_size_pts: f32, dpi: u16) !FontSystem {
+        const font_size = font_metrics.FontSize{
+            .points = font_size_pts,
+            .dpi = dpi,
+        };
+        return try initWithFontSize(allocator, font_size);
     }
 
-    fn initWithFontSize(allocator: std.mem.Allocator, font_size_px: u32) !FontSystem {
-        log.info("Initializing font system with size {d}px", .{font_size_px});
+    /// Initialize with default font size
+    pub fn initDefault(allocator: std.mem.Allocator, dpi: u16) !FontSystem {
+        const font_size = font_metrics.FontSize.default(dpi);
+        return try initWithFontSize(allocator, font_size);
+    }
+
+    fn initWithFontSize(allocator: std.mem.Allocator, font_size: font_metrics.FontSize) !FontSystem {
+        const font_size_px = font_size.toPixels();
+        log.info("Initializing font system with size {d:.1}pt ({d:.1}px) at {d} DPI", .{ font_size.points, font_size_px, font_size.dpi });
 
         // Initialize FreeType library
         var library = try freetype.Library.init();
@@ -149,28 +173,23 @@ pub const FontSystem = struct {
 
         log.info("Bold-Italic font face loaded ({d} bytes)", .{font_data_bold_italic.len});
 
-        // Set character size for all faces (using 96 DPI)
-        // FreeType uses 1/64th of points, so multiply pixel size by 64
-        // For pixel-based sizing, we use the formula: pixels * 64 * 72 / dpi
-        const dpi = 96;
-        const char_height_26_6: i32 = @intCast((font_size_px * 64 * 72) / dpi);
-        try face.setCharSize(0, char_height_26_6, dpi, dpi);
-        try face_bold.setCharSize(0, char_height_26_6, dpi, dpi);
-        try face_italic.setCharSize(0, char_height_26_6, dpi, dpi);
-        try face_bold_italic.setCharSize(0, char_height_26_6, dpi, dpi);
+        // Set character size for all faces using the FontSize configuration
+        // For monospace fonts, set both width and height to ensure proper aspect ratio
+        const char_size_26_6 = font_size.to26Dot6();
+        try face.setCharSize(char_size_26_6, char_size_26_6, font_size.dpi, font_size.dpi);
+        try face_bold.setCharSize(char_size_26_6, char_size_26_6, font_size.dpi, font_size.dpi);
+        try face_italic.setCharSize(char_size_26_6, char_size_26_6, font_size.dpi, font_size.dpi);
+        try face_bold_italic.setCharSize(char_size_26_6, char_size_26_6, font_size.dpi, font_size.dpi);
 
-        log.info("Font size set to {d}px at {d} DPI for all faces", .{ font_size_px, dpi });
+        log.info("Font size set to {d:.1}pt at {d} DPI for all faces", .{ font_size.points, font_size.dpi });
 
-        // Calculate font metrics by measuring a typical character
-        const char_m_index = face.getCharIndex('M') orelse return error.GlyphNotFound;
-        try face.loadGlyph(char_m_index, .{ .render = true });
-        try face.renderGlyph(.normal);
-        const glyph = face.handle.*.glyph;
+        // Extract proper font metrics using the new system
+        const metrics = try font_metrics.extractMetrics(face, font_size);
 
-        const cell_width = @as(u32, @intCast(glyph.*.advance.x)) >> 6; // Convert 26.6 to pixels
-        // Add 20% line height for better spacing (terminals typically need more vertical space)
-        const cell_height = (font_size_px * 120) / 100; // 1.2x line height
-        const baseline = @as(i32, @intCast(glyph.*.bitmap_top));
+        // Calculate cell dimensions from metrics
+        const cell_width = metrics.cellWidth();
+        const cell_height = metrics.cellHeight();
+        const baseline = @as(i32, @intCast(metrics.baseline()));
 
         // Calculate glyph size: Use cell_height plus padding
         // Don't round to power of 2 as it causes atlas misalignment
@@ -249,6 +268,8 @@ pub const FontSystem = struct {
             .face_bold = face_bold,
             .face_italic = face_italic,
             .face_bold_italic = face_bold_italic,
+            .font_size = font_size,
+            .metrics = metrics,
             .cell_width = cell_width,
             .cell_height = cell_height,
             .baseline = baseline,

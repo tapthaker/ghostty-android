@@ -1,5 +1,6 @@
 package com.ghostty.android.renderer
 
+import android.content.Context
 import android.opengl.GLSurfaceView
 import android.util.Log
 import javax.microedition.khronos.egl.EGLConfig
@@ -11,7 +12,7 @@ import javax.microedition.khronos.opengles.GL10
  * This class implements the GLSurfaceView.Renderer interface and delegates
  * all rendering operations to the native Zig renderer via JNI.
  */
-class GhosttyRenderer : GLSurfaceView.Renderer {
+class GhosttyRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     companion object {
         private const val TAG = "GhosttyRenderer"
@@ -31,7 +32,7 @@ class GhosttyRenderer : GLSurfaceView.Renderer {
 
     // Native method declarations
     private external fun nativeOnSurfaceCreated()
-    private external fun nativeOnSurfaceChanged(width: Int, height: Int)
+    private external fun nativeOnSurfaceChanged(width: Int, height: Int, dpi: Int)
     private external fun nativeOnDrawFrame()
     private external fun nativeDestroy()
     private external fun nativeSetTerminalSize(cols: Int, rows: Int)
@@ -67,10 +68,14 @@ class GhosttyRenderer : GLSurfaceView.Renderer {
      * @param height The new surface height in pixels
      */
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
-        Log.d(TAG, "onSurfaceChanged: ${width}x${height}")
+        // Get the display density (DPI) from Android
+        val displayMetrics = context.resources.displayMetrics
+        val dpi = displayMetrics.densityDpi // This is an integer DPI value
+
+        Log.d(TAG, "onSurfaceChanged: ${width}x${height} at $dpi DPI")
 
         try {
-            nativeOnSurfaceChanged(width, height)
+            nativeOnSurfaceChanged(width, height, dpi)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeOnSurfaceChanged", e)
             throw e
