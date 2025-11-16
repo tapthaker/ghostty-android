@@ -117,19 +117,31 @@ void main() {
     // the y offset. The X bearing is the distance from the left of the cell
     // to the left of the glyph, so it works as the x offset directly.
 
-    // Simple glyph rendering - no quad expansion
-    vec2 size = vec2(glyph_size);
-    vec2 offset = vec2(bearings);
-    offset.y = cell_size.y - offset.y;
+    // Simple glyph rendering
+    // The quad should be exactly cell-sized and positioned at the grid location
+    vec2 size = cell_size;
 
-    // All glyphs render normally without expansion
+    // Bearings should NOT affect cell position - they only affect texture sampling
+    // The cell/quad stays at its grid position
+    vec2 quad_pos = cell_pos + size * corner;
+
+    // Bearings are already applied when glyphs are rendered into the atlas
+    // The renderGlyphToAtlas function positions glyphs with their bearings
+    // So we just need simple texture coordinate mapping
+
+    // For now, use simple mapping without additional bearing adjustments
+    // If glyphs appear misaligned, we'll need to adjust how they're
+    // positioned in the atlas instead
     out_glyph_bounds = vec4(0.0, 0.0, 1.0, 1.0);
     out_tex_coord = vec2(glyph_pos) + vec2(glyph_size) * corner;
     out_cell_coord = corner;
 
-    // Calculate the final position of the cell
-    cell_pos = cell_pos + size * corner + offset;
-    gl_Position = projection_matrix * vec4(cell_pos.x, cell_pos.y, 0.0, 1.0);
+    // Note: Bearings are passed through for potential future use
+    // but not applied to texture coordinates since they're already
+    // baked into the atlas positioning
+
+    // The quad position is fixed at the grid cell - no bearing offset!
+    gl_Position = projection_matrix * vec4(quad_pos.x, quad_pos.y, 0.0, 1.0);
 
     // Get our color. We always fetch a linearized version to
     // make it easier to handle minimum contrast calculations.

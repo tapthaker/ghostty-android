@@ -86,6 +86,15 @@ bool isUnderline(uint underline_type, vec2 cell_coord) {
     return false;
 }
 
+// Check if we should draw strikethrough at this pixel
+bool isStrikethrough(vec2 cell_coord) {
+    float y = cell_coord.y;
+    float line_thickness = 0.04; // 4% of cell height
+    float strikethrough_pos = 0.45; // Position at 45% down the cell (middle)
+
+    return (y >= strikethrough_pos && y <= strikethrough_pos + line_thickness);
+}
+
 
 void main() {
     bool use_linear_blending = (bools & USE_LINEAR_BLENDING) != 0u;
@@ -216,20 +225,40 @@ void main() {
     // Bold and italic are now handled by using actual bold/italic glyphs from the atlas
     // No need for synthetic brightness adjustment
 
-    // Decorations like strikethrough and underline are rendered as separate sprites
-    // following Ghostty's approach, not drawn in the text shader
+    // Apply underline if needed
+    if (isUnderline(underline_type, out_cell_coord)) {
+        // Draw underline with the foreground color
+        final_color = fg_color;
+        // For linear blending, ensure proper color space
+        if (!use_linear_blending) {
+            final_color.rgb /= vec3(final_color.a);
+            final_color = unlinearize(final_color);
+            final_color.rgb *= vec3(final_color.a);
+        }
+    }
 
-    // DEBUG: Cell boundary visualization
-    // Draw only left and top borders to avoid overlap between adjacent cells
-    // This helps debug cell overlap and positioning issues
+    // Apply strikethrough if needed
+    if (is_strikethrough && isStrikethrough(out_cell_coord)) {
+        // Draw strikethrough with the foreground color
+        final_color = fg_color;
+        // For linear blending, ensure proper color space
+        if (!use_linear_blending) {
+            final_color.rgb /= vec3(final_color.a);
+            final_color = unlinearize(final_color);
+            final_color.rgb *= vec3(final_color.a);
+        }
+    }
 
+    // DEBUG: Cell boundary visualization (disabled)
+    // Uncomment to debug cell positioning
+    /*
     float border_thickness = 0.01; // 1% of cell size for thinner border
     // Only draw left and top borders to avoid overlap
     if (out_cell_coord.x < border_thickness || out_cell_coord.y < border_thickness) {
         // Draw a semi-transparent red border
         final_color = mix(final_color, vec4(1.0, 0.0, 0.0, 0.3), 0.7);
     }
-
+    */
 
     out_FragColor = final_color;
 }

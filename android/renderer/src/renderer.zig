@@ -106,33 +106,49 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) !Self {
     // Note: We use binding 0 for UBO since binding 1 is used for SSBO
     uniforms_buffer.bindBase(0);
 
-    // Initialize font system first to get cell dimensions
-    var font_system = try FontSystem.init(allocator, 48);
+    // Define desired grid size (standard terminal dimensions)
+    const desired_cols: u32 = 80;
+    const desired_rows: u32 = 24;
+
+    // Calculate cell size from screen dimensions and desired grid
+    // If screen dimensions are provided, calculate cell size to fit the grid
+    const cell_width: u32 = if (width > 0)
+        width / desired_cols
+    else
+        10; // Default cell width if no screen size
+
+    const cell_height: u32 = if (height > 0)
+        height / desired_rows
+    else
+        20; // Default cell height if no screen size
+
+    log.info("Calculated cell size: {d}x{d} for grid {d}x{d} on screen {d}x{d}", .{
+        cell_width, cell_height, desired_cols, desired_rows, width, height
+    });
+
+    // Initialize font system with calculated cell dimensions
+    var font_system = try FontSystem.initWithCellSize(allocator, cell_width, cell_height);
     errdefer font_system.deinit();
 
     log.info("Font system initialized", .{});
 
-    // Calculate initial terminal grid dimensions based on screen size
-    // Use provided dimensions if non-zero, otherwise default to 80x24
-    const cell_size = font_system.getCellSize();
-    const cell_width = @as(u32, @intFromFloat(cell_size[0]));
-    const cell_height = @as(u32, @intFromFloat(cell_size[1]));
+    // Verify the actual cell size matches what we requested
+    const actual_cell_size = font_system.getCellSize();
+    const actual_cell_width = @as(u32, @intFromFloat(actual_cell_size[0]));
+    const actual_cell_height = @as(u32, @intFromFloat(actual_cell_size[1]));
+
+    log.info("Font system cell size: requested={d}x{d}, actual={d}x{d}", .{
+        cell_width, cell_height, actual_cell_width, actual_cell_height
+    });
 
     // Calculate viewport padding needed to prevent glyph clipping
     // Glyphs can extend past their cell boundaries due to font bearings
     const padding = font_system.getViewportPadding();
     log.info("Viewport padding: right={d}px, bottom={d}px", .{ padding.right, padding.bottom });
 
-    // Calculate grid using FULL viewport (no padding subtraction)
-    // The projection matrix will be expanded to include padding area
-    const initial_grid_cols: u32 = if (width > 0 and cell_width > 0)
-        @min(width / cell_width, 512)
-    else
-        80;
-    const initial_grid_rows: u32 = if (height > 0 and cell_height > 0)
-        @min(height / cell_height, 512)
-    else
-        24;
+    // Use the desired grid dimensions directly
+    const initial_grid_cols: u32 = desired_cols;
+    const initial_grid_rows: u32 = desired_rows;
 
     log.info("Calculated terminal grid: {d}x{d} (cell size: {d}x{d})", .{
         initial_grid_cols,
@@ -568,7 +584,7 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
     var test_glyphs: [test_string.len]shaders.CellText = undefined;
 
     for (test_string, 0..) |char, i| {
-        test_glyphs[i] = self.font_system.makeCellText(
+        test_glyphs[i] = (&self.font_system).makeCellText(
             char,
             @intCast(i), // col
             0, // row
@@ -654,7 +670,7 @@ pub fn syncFromTerminal(self: *Self) !void {
                 };
 
                 // Render the background block with original foreground color (which becomes background in inverse)
-                try text_glyphs.append(self.allocator, self.font_system.makeCellText(
+                try text_glyphs.append(self.allocator, (&self.font_system).makeCellText(
                     @intCast(block_char),
                     cell.col,
                     cell.row,
@@ -663,7 +679,7 @@ pub fn syncFromTerminal(self: *Self) !void {
                 ));
             }
 
-            try text_glyphs.append(self.allocator, self.font_system.makeCellText(
+            try text_glyphs.append(self.allocator, (&self.font_system).makeCellText(
                 cell.codepoint,
                 cell.col,
                 cell.row,
@@ -671,63 +687,11 @@ pub fn syncFromTerminal(self: *Self) !void {
                 attributes,
             ));
 
-            // Following Ghostty's approach: render decorations as separate sprites
+            // Strikethrough is now rendered in the fragment shader as a graphical overlay
+            // No need to add separate strikethrough characters anymore
 
-            // Render strikethrough as a separate sprite
-            if (cell.strikethrough) {
-                // Use box drawing character like Ghostty does
-                const strikethrough_char: u32 = 0x2500; // ─ (box drawing light horizontal)
-
-                // Create attributes without decorations to avoid infinite recursion
-                const line_attributes = shaders.CellText.Attributes{
-                    .bold = false,
-                    .italic = false,
-                    .dim = false,
-                    .strikethrough = false,
-                    .underline = .none,
-                    .inverse = false,
-                };
-
-                try text_glyphs.append(self.allocator, self.font_system.makeCellText(
-                    @intCast(strikethrough_char),
-                    cell.col,
-                    cell.row,
-                    cell.fg_color,
-                    line_attributes,
-                ));
-            }
-
-            // Render underline as a separate sprite
-            if (cell.underline != .none) {
-                // Choose appropriate underline character based on style
-                // Note: These are approximations since we don't have dedicated underline sprites
-                const underline_char: u32 = switch (cell.underline) {
-                    .none => unreachable,
-                    .single => 0x2581, // ▁ (lower one eighth block - positioned at bottom)
-                    .double => 0x2550, // ═ (box drawing double horizontal)
-                    .curly => 0x223C, // ∼ (tilde operator, for wavy)
-                    .dotted => 0x2026, // … (horizontal ellipsis for dotted effect)
-                    .dashed => 0x2500, // ─ (box drawing light horizontal)
-                };
-
-                // Create attributes without decorations to avoid infinite recursion
-                const line_attributes = shaders.CellText.Attributes{
-                    .bold = false,
-                    .italic = false,
-                    .dim = false,
-                    .strikethrough = false,
-                    .underline = .none,
-                    .inverse = false,
-                };
-
-                try text_glyphs.append(self.allocator, self.font_system.makeCellText(
-                    @intCast(underline_char),
-                    cell.col,
-                    cell.row,
-                    cell.fg_color,
-                    line_attributes,
-                ));
-            }
+            // Underline is now rendered in the fragment shader as a graphical overlay
+            // No need to add separate underline characters anymore
         } else {
             skipped_count += 1;
         }

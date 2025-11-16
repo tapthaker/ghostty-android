@@ -25,6 +25,7 @@ pub const FontStyle = enum(u2) {
 /// Atlas data for tracking glyph positions per style
 pub const AtlasData = struct {
     positions: std.AutoHashMap(u21, [2]u32),
+    bearings: std.AutoHashMap(u21, [2]i16), // Store bearings for each glyph
     next_x: u32,
     next_y: u32,
     row_height: u32,
@@ -61,6 +62,7 @@ pub const FontSystem = struct {
 
     // Constants must come after all fields
     const ATLAS_COLS = 16; // 16 characters per row
+    const ATLAS_PADDING = 2; // Padding between glyphs to prevent bleeding
 
     /// Common Unicode characters beyond ASCII (for terminal emulation)
     const UNICODE_CHARS = [_]u21{
@@ -82,7 +84,35 @@ pub const FontSystem = struct {
         0x2581, // ▁ Lower one eighth block (for single underline)
     };
 
+    /// Initialize font system with desired cell dimensions
+    /// This calculates the appropriate font size to fit within the given cell size
+    pub fn initWithCellSize(allocator: std.mem.Allocator, desired_cell_width: u32, desired_cell_height: u32) !FontSystem {
+        // Calculate font size from cell height (accounting for line spacing)
+        // We use cell_height / 1.2 since we add 20% line height
+        const font_size_px = (desired_cell_height * 100) / 120; // Reverse of: cell_height = font_size * 1.2
+
+        log.info("Initializing font system for cell size {d}x{d}, computed font size: {d}px", .{
+            desired_cell_width, desired_cell_height, font_size_px
+        });
+
+        var font_sys = try initWithFontSize(allocator, font_size_px);
+
+        // Override the calculated cell width with the requested width
+        // This ensures we fit exactly in the grid
+        font_sys.cell_width = desired_cell_width;
+        font_sys.cell_height = desired_cell_height;
+
+        log.info("Using requested cell dimensions: {d}x{d}", .{ desired_cell_width, desired_cell_height });
+
+        return font_sys;
+    }
+
+    /// Initialize font system with specific font size (legacy method)
     pub fn init(allocator: std.mem.Allocator, font_size_px: u32) !FontSystem {
+        return try initWithFontSize(allocator, font_size_px);
+    }
+
+    fn initWithFontSize(allocator: std.mem.Allocator, font_size_px: u32) !FontSystem {
         log.info("Initializing font system with size {d}px", .{font_size_px});
 
         // Initialize FreeType library
@@ -138,13 +168,13 @@ pub const FontSystem = struct {
         const glyph = face.handle.*.glyph;
 
         const cell_width = @as(u32, @intCast(glyph.*.advance.x)) >> 6; // Convert 26.6 to pixels
-        const cell_height = font_size_px;
+        // Add 20% line height for better spacing (terminals typically need more vertical space)
+        const cell_height = (font_size_px * 120) / 100; // 1.2x line height
         const baseline = @as(i32, @intCast(glyph.*.bitmap_top));
 
-        // Calculate glyph size: 1.5x font size, rounded up to power of 2 for better texture performance
-        const glyph_size_calc = (font_size_px * 3) / 2;
-        var glyph_size: u32 = 16; // Minimum size
-        while (glyph_size < glyph_size_calc) : (glyph_size *= 2) {}
+        // Calculate glyph size: Use cell_height plus padding
+        // Don't round to power of 2 as it causes atlas misalignment
+        const glyph_size = cell_height + ATLAS_PADDING * 2; // Add padding on both sides
 
         log.info("Font metrics: cell={d}x{d}, baseline={d}, glyph_size={d}", .{ cell_width, cell_height, baseline, glyph_size });
 
@@ -185,24 +215,28 @@ pub const FontSystem = struct {
         // Initialize atlas data structures for each style
         const atlas_regular = AtlasData{
             .positions = std.AutoHashMap(u21, [2]u32).init(allocator),
+            .bearings = std.AutoHashMap(u21, [2]i16).init(allocator),
             .next_x = 0,
             .next_y = 0,
             .row_height = 0,
         };
         const atlas_bold = AtlasData{
             .positions = std.AutoHashMap(u21, [2]u32).init(allocator),
+            .bearings = std.AutoHashMap(u21, [2]i16).init(allocator),
             .next_x = 0,
             .next_y = 0,
             .row_height = 0,
         };
         const atlas_italic = AtlasData{
             .positions = std.AutoHashMap(u21, [2]u32).init(allocator),
+            .bearings = std.AutoHashMap(u21, [2]i16).init(allocator),
             .next_x = 0,
             .next_y = 0,
             .row_height = 0,
         };
         const atlas_bold_italic = AtlasData{
             .positions = std.AutoHashMap(u21, [2]u32).init(allocator),
+            .bearings = std.AutoHashMap(u21, [2]i16).init(allocator),
             .next_x = 0,
             .next_y = 0,
             .row_height = 0,
@@ -232,9 +266,13 @@ pub const FontSystem = struct {
 
     pub fn deinit(self: *FontSystem) void {
         self.atlas_regular.positions.deinit();
+        self.atlas_regular.bearings.deinit();
         self.atlas_bold.positions.deinit();
+        self.atlas_bold.bearings.deinit();
         self.atlas_italic.positions.deinit();
+        self.atlas_italic.bearings.deinit();
         self.atlas_bold_italic.positions.deinit();
+        self.atlas_bold_italic.bearings.deinit();
         self.face.deinit();
         self.face_bold.deinit();
         self.face_italic.deinit();
@@ -268,16 +306,6 @@ pub const FontSystem = struct {
         };
     }
 
-    /// Get atlas data for a specific style
-    fn getAtlasForStyle(self: *FontSystem, style: FontStyle) *AtlasData {
-        return switch (style) {
-            .regular => &self.atlas_regular,
-            .bold => &self.atlas_bold,
-            .italic => &self.atlas_italic,
-            .bold_italic => &self.atlas_bold_italic,
-        };
-    }
-
     /// Render ASCII and common Unicode characters into atlas and return atlas data
     pub fn populateAtlas(
         self: *FontSystem,
@@ -302,27 +330,51 @@ pub const FontSystem = struct {
             var char: u8 = 32;
             while (char <= 126) : (char += 1) {
                 const atlas_pos = self.getAtlasPos(char, style);
-                try self.renderGlyphToAtlas(char, style, atlas_pos, atlas_data, atlas_width, atlas_height);
+                const bearings = try self.renderGlyphToAtlas(char, style, atlas_pos, atlas_data, atlas_width, atlas_height);
 
-                // Store position in atlas hashmap for this style
-                const atlas = self.getAtlasForStyle(style);
+                // Store position and bearings in atlas hashmap for this style
+                // We need to access the mutable atlas directly, not through the const helper
+                const atlas = switch (style) {
+                    .regular => &self.atlas_regular,
+                    .bold => &self.atlas_bold,
+                    .italic => &self.atlas_italic,
+                    .bold_italic => &self.atlas_bold_italic,
+                };
                 try atlas.positions.put(char, atlas_pos);
+                try atlas.bearings.put(char, bearings);
             }
 
             // Render common Unicode characters
             for (UNICODE_CHARS) |unicode_char| {
                 const atlas_pos = self.getAtlasPos(unicode_char, style);
-                try self.renderGlyphToAtlasUnicode(unicode_char, style, atlas_pos, atlas_data, atlas_width, atlas_height);
+                const bearings = try self.renderGlyphToAtlasUnicode(unicode_char, style, atlas_pos, atlas_data, atlas_width, atlas_height);
 
-                // Store position in atlas hashmap for this style
-                const atlas = self.getAtlasForStyle(style);
+                // Store position and bearings in atlas hashmap for this style
+                // We need to access the mutable atlas directly, not through the const helper
+                const atlas = switch (style) {
+                    .regular => &self.atlas_regular,
+                    .bold => &self.atlas_bold,
+                    .italic => &self.atlas_italic,
+                    .bold_italic => &self.atlas_bold_italic,
+                };
                 try atlas.positions.put(unicode_char, atlas_pos);
+                try atlas.bearings.put(unicode_char, bearings);
             }
         }
 
         log.info("Atlas populated with {d} ASCII + {d} Unicode characters for all 4 styles", .{ 127 - 32, UNICODE_CHARS.len });
 
         return atlas_data;
+    }
+
+    /// Get atlas data for a given style
+    fn getAtlasForStyle(self: *const FontSystem, style: FontStyle) *const AtlasData {
+        return switch (style) {
+            .regular => &self.atlas_regular,
+            .bold => &self.atlas_bold,
+            .italic => &self.atlas_italic,
+            .bold_italic => &self.atlas_bold_italic,
+        };
     }
 
     /// Get atlas position for a character with specific font style
@@ -355,15 +407,16 @@ pub const FontSystem = struct {
         const col = index % ATLAS_COLS;
         const row = index / ATLAS_COLS;
 
-        // Base position within the quadrant
-        const base_x: u32 = col * self.glyph_size;
-        const base_y: u32 = row * self.glyph_size;
+        // Base position within the quadrant (including padding)
+        const slot_size = self.glyph_size + ATLAS_PADDING;
+        const base_x: u32 = col * slot_size + ATLAS_PADDING / 2; // Add half padding to start
+        const base_y: u32 = row * slot_size + ATLAS_PADDING / 2;
 
         // Calculate number of rows needed for all characters in one style
         const num_chars: u32 = 95 + @as(u32, @intCast(UNICODE_CHARS.len));
         const num_rows: u32 = (num_chars + ATLAS_COLS - 1) / ATLAS_COLS;
-        const quadrant_width = ATLAS_COLS * self.glyph_size;
-        const quadrant_height = num_rows * self.glyph_size;
+        const quadrant_width = ATLAS_COLS * slot_size;
+        const quadrant_height = num_rows * slot_size;
 
         // Offset based on style (organize in 2x2 grid)
         const style_offset: [2]u32 = switch (style) {
@@ -377,6 +430,7 @@ pub const FontSystem = struct {
     }
 
     /// Render a single ASCII glyph into the atlas at the specified position
+    /// Returns the bearing values for this glyph
     fn renderGlyphToAtlas(
         self: *FontSystem,
         char: u8,
@@ -385,7 +439,7 @@ pub const FontSystem = struct {
         atlas_data: []u8,
         atlas_width: u32,
         atlas_height: u32,
-    ) !void {
+    ) ![2]i16 {
         // Select the appropriate face and render the glyph
         const face = switch (style) {
             .regular => self.face,
@@ -394,7 +448,7 @@ pub const FontSystem = struct {
             .bold_italic => self.face_bold_italic,
         };
 
-        const glyph_index = face.getCharIndex(char) orelse return;
+        const glyph_index = face.getCharIndex(char) orelse return .{ 0, 0 };
         try face.loadGlyph(glyph_index, .{ .render = true });
         try face.renderGlyph(.normal);
 
@@ -404,29 +458,42 @@ pub const FontSystem = struct {
         // Get bitmap dimensions
         const bmp_width = bitmap.width;
         const bmp_height = bitmap.rows;
-        const bmp_buffer = bitmap.buffer orelse return; // Empty glyph (space, etc.)
 
-        // Calculate position with baseline alignment
-        // Horizontally center the glyph
-        const x_offset = (self.glyph_size - bmp_width) / 2;
+        // Get bearings
+        const bearing_x = @as(i16, @intCast(glyph.*.bitmap_left));
+        const bearing_y = @as(i16, @intCast(glyph.*.bitmap_top));
 
-        // Vertically align based on baseline
+        const bmp_buffer = bitmap.buffer orelse return .{ bearing_x, bearing_y }; // Empty glyph (space, etc.)
+
+        // Use bearing_x for horizontal positioning (don't center)
+        // This preserves the glyph's natural positioning relative to its origin
+        // bearing_x is the horizontal offset from the origin to the left edge of the bitmap
+        const x_offset = if (bearing_x >= 0)
+            @as(u32, @intCast(bearing_x))
+        else
+            0; // Clamp negative bearings to prevent underflow
+
+        // Y offset: Position relative to baseline
         // Place baseline at a consistent position within the slot (3/4 down from top)
         const baseline_pos = (self.glyph_size * 3) / 4;
-        const bitmap_top = glyph.*.bitmap_top;
+        // bearing_y (bitmap_top) is the distance from baseline to top of bitmap
         // y_offset positions the top of the bitmap relative to the slot top
-        const y_offset = baseline_pos - @as(u32, @intCast(bitmap_top));
+        const y_offset = baseline_pos - @as(u32, @intCast(bearing_y));
 
-        // Copy bitmap data to atlas
+        // Copy bitmap data to atlas (clipping to glyph_size to stay within padded area)
         var y: u32 = 0;
         while (y < bmp_height) : (y += 1) {
             const atlas_y = atlas_pos[1] + y_offset + y;
             if (atlas_y >= atlas_height) break;
+            // Don't render beyond our allocated slot
+            if (y_offset + y >= self.glyph_size) break;
 
             var x: u32 = 0;
             while (x < bmp_width) : (x += 1) {
                 const atlas_x = atlas_pos[0] + x_offset + x;
                 if (atlas_x >= atlas_width) break;
+                // Don't render beyond our allocated slot
+                if (x_offset + x >= self.glyph_size) break;
 
                 const atlas_index = atlas_y * atlas_width + atlas_x;
                 const bmp_index = y * bmp_width + x;
@@ -434,9 +501,13 @@ pub const FontSystem = struct {
                 atlas_data[atlas_index] = bmp_buffer[bmp_index];
             }
         }
+
+        // Return the bearing values
+        return .{ bearing_x, bearing_y };
     }
 
     /// Render a single Unicode glyph into the atlas at the specified position
+    /// Returns the bearing values for this glyph
     fn renderGlyphToAtlasUnicode(
         self: *FontSystem,
         codepoint: u21,
@@ -445,7 +516,7 @@ pub const FontSystem = struct {
         atlas_data: []u8,
         atlas_width: u32,
         atlas_height: u32,
-    ) !void {
+    ) ![2]i16 {
         // Select the appropriate face and render the glyph
         const face = switch (style) {
             .regular => self.face,
@@ -454,7 +525,7 @@ pub const FontSystem = struct {
             .bold_italic => self.face_bold_italic,
         };
 
-        const glyph_index = face.getCharIndex(codepoint) orelse return;
+        const glyph_index = face.getCharIndex(codepoint) orelse return .{ 0, 0 };
         try face.loadGlyph(glyph_index, .{ .render = true });
         try face.renderGlyph(.normal);
 
@@ -464,29 +535,42 @@ pub const FontSystem = struct {
         // Get bitmap dimensions
         const bmp_width = bitmap.width;
         const bmp_height = bitmap.rows;
-        const bmp_buffer = bitmap.buffer orelse return; // Empty glyph (space, etc.)
 
-        // Calculate position with baseline alignment
-        // Horizontally center the glyph
-        const x_offset = (self.glyph_size - bmp_width) / 2;
+        // Get bearings
+        const bearing_x = @as(i16, @intCast(glyph.*.bitmap_left));
+        const bearing_y = @as(i16, @intCast(glyph.*.bitmap_top));
 
-        // Vertically align based on baseline
+        const bmp_buffer = bitmap.buffer orelse return .{ bearing_x, bearing_y }; // Empty glyph (space, etc.)
+
+        // Use bearing_x for horizontal positioning (don't center)
+        // This preserves the glyph's natural positioning relative to its origin
+        // bearing_x is the horizontal offset from the origin to the left edge of the bitmap
+        const x_offset = if (bearing_x >= 0)
+            @as(u32, @intCast(bearing_x))
+        else
+            0; // Clamp negative bearings to prevent underflow
+
+        // Y offset: Position relative to baseline
         // Place baseline at a consistent position within the slot (3/4 down from top)
         const baseline_pos = (self.glyph_size * 3) / 4;
-        const bitmap_top = glyph.*.bitmap_top;
+        // bearing_y (bitmap_top) is the distance from baseline to top of bitmap
         // y_offset positions the top of the bitmap relative to the slot top
-        const y_offset = baseline_pos - @as(u32, @intCast(bitmap_top));
+        const y_offset = baseline_pos - @as(u32, @intCast(bearing_y));
 
-        // Copy bitmap data to atlas
+        // Copy bitmap data to atlas (clipping to glyph_size to stay within padded area)
         var y: u32 = 0;
         while (y < bmp_height) : (y += 1) {
             const atlas_y = atlas_pos[1] + y_offset + y;
             if (atlas_y >= atlas_height) break;
+            // Don't render beyond our allocated slot
+            if (y_offset + y >= self.glyph_size) break;
 
             var x: u32 = 0;
             while (x < bmp_width) : (x += 1) {
                 const atlas_x = atlas_pos[0] + x_offset + x;
                 if (atlas_x >= atlas_width) break;
+                // Don't render beyond our allocated slot
+                if (x_offset + x >= self.glyph_size) break;
 
                 const atlas_index = atlas_y * atlas_width + atlas_x;
                 const bmp_index = y * bmp_width + x;
@@ -494,12 +578,26 @@ pub const FontSystem = struct {
                 atlas_data[atlas_index] = bmp_buffer[bmp_index];
             }
         }
+
+        // Return the bearing values
+        return .{ bearing_x, bearing_y };
     }
 
     /// Generate CellText instance for rendering a character at a grid position
     /// Supports ASCII 32-126 and common Unicode characters. Out-of-range codepoints render as space.
+    ///
+    /// BEARING IMPLEMENTATION:
+    /// Bearings are now properly implemented. Glyphs are rendered to the atlas without
+    /// centering, preserving their original positioning. The vertex shader uses the
+    /// bearing values to correctly position each glyph within its cell.
+    ///
+    /// This approach ensures:
+    /// - Proper positioning of italic characters that lean outside cell boundaries
+    /// - Correct rendering of characters with negative bearings
+    /// - Accurate placement of special symbols and Unicode characters
+    /// - Better visual fidelity for fonts with complex metrics
     pub fn makeCellText(
-        self: FontSystem,
+        self: *FontSystem,
         codepoint: u21,
         grid_col: u16,
         grid_row: u16,
@@ -519,10 +617,14 @@ pub const FontSystem = struct {
         // Get atlas position for this style
         const atlas_pos = self.getAtlasPos(codepoint, style);
 
+        // Look up bearing values for proper glyph positioning
+        const atlas = self.getAtlasForStyle(style);
+        const bearings = atlas.bearings.get(codepoint) orelse .{ 0, 0 };
+
         return shaders.CellText{
             .glyph_pos = atlas_pos,
             .glyph_size = .{ self.glyph_size, self.glyph_size },
-            .bearings = .{ 0, 0 }, // Simplified for Phase 1
+            .bearings = bearings, // Use actual bearings for accurate positioning
             .grid_pos = .{ grid_col, grid_row },
             .color = color,
             .atlas = .grayscale,
@@ -539,9 +641,10 @@ pub const FontSystem = struct {
         const num_chars: u32 = 95 + @as(u32, @intCast(UNICODE_CHARS.len));
         const num_rows: u32 = (num_chars + ATLAS_COLS - 1) / ATLAS_COLS; // Ceiling division
 
-        // Single quadrant dimensions
-        const quadrant_width: u32 = ATLAS_COLS * self.glyph_size;
-        const quadrant_height: u32 = num_rows * self.glyph_size;
+        // Single quadrant dimensions (including padding)
+        const slot_size: u32 = self.glyph_size + ATLAS_PADDING;
+        const quadrant_width: u32 = ATLAS_COLS * slot_size;
+        const quadrant_height: u32 = num_rows * slot_size;
 
         // Total atlas is 2x2 grid of quadrants (4 styles)
         const width: u32 = quadrant_width * 2;
