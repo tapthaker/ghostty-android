@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Automated Feedback Loop for Visual Testing
+Automated Screenshot Capture for Visual Testing
 
-This script runs one test at a time, captures screenshots,
-and allows for verification and iteration.
+This script runs tests automatically and captures screenshots
+without requiring user interaction.
 
 Usage:
     python test_feedback_loop.py [--test-id TEST_ID] [--start-from TEST_ID]
@@ -45,7 +45,7 @@ ALL_TESTS = [
 
 
 class TestFeedbackLoop:
-    """Interactive feedback loop for visual regression testing."""
+    """Automated screenshot capture for visual testing."""
 
     def __init__(self, output_dir: str = "/tmp/feedback_tests"):
         self.output_dir = Path(output_dir)
@@ -198,52 +198,14 @@ class TestFeedbackLoop:
             return None
 
     def display_screenshot(self, screenshot_path: Path):
-        """Display screenshot for verification."""
-        print(f"\n🖼  Screenshot: file://{screenshot_path.absolute()}")
-
-        # Try to open with default image viewer
-        try:
-            subprocess.run(["xdg-open", str(screenshot_path)], check=False)
-        except:
-            pass
-
-    def verify_test(self, test_id: str, screenshot_path: Path) -> bool:
-        """Interactive verification of test result."""
-        print(f"\n{'='*60}")
-        print(f"  VERIFY TEST: {test_id}")
-        print(f"{'='*60}")
-        print(f"\nScreenshot: {screenshot_path}")
-        print("\nPlease verify the screenshot:")
-        print("  - Check colors are correct")
-        print("  - Check text is rendered properly")
-        print("  - Check layout matches expectations")
-
-        while True:
-            response = input("\nDoes the test PASS? (y/n/skip/quit): ").lower().strip()
-
-            if response == 'y' or response == 'yes':
-                return True
-            elif response == 'n' or response == 'no':
-                return False
-            elif response == 's' or response == 'skip':
-                return None  # Skip this test
-            elif response == 'q' or response == 'quit':
-                sys.exit(0)
-            else:
-                print("Invalid response. Please enter y, n, skip, or quit")
+        """Display screenshot path."""
+        print(f"\n🖼  Screenshot saved: file://{screenshot_path.absolute()}")
 
     def run_single_test(self, test_id: str) -> Optional[bool]:
-        """Run a single test through the feedback loop."""
+        """Run a single test and capture screenshot automatically."""
         print(f"\n\n{'#'*60}")
         print(f"#  TEST: {test_id}")
         print(f"{'#'*60}\n")
-
-        # Check if already passed
-        if test_id in self.results and self.results[test_id].get("status") == "PASSED":
-            print(f"ℹ  Test {test_id} already PASSED")
-            response = input("Run again? (y/n): ").lower().strip()
-            if response != 'y' and response != 'yes':
-                return True
 
         # Launch test
         if not self.launch_test(test_id):
@@ -263,94 +225,69 @@ class TestFeedbackLoop:
         # Capture screenshot
         screenshot_path = self.capture_screenshot(test_id)
         if not screenshot_path:
-            return False
-
-        # Display screenshot
-        self.display_screenshot(screenshot_path)
-
-        # Verify
-        result = self.verify_test(test_id, screenshot_path)
-
-        if result is None:  # Skipped
-            print(f"\n⏭  Test {test_id} skipped")
+            print(f"❌ Failed to capture screenshot for {test_id}")
             self.results[test_id] = {
-                "status": "SKIPPED",
-                "screenshot": str(screenshot_path),
+                "status": "FAILED",
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
             }
             self.save_results()
-            return None
+            return False
 
-        if result:
-            print(f"\n✅ Test {test_id} PASSED")
-            self.results[test_id] = {
-                "status": "PASSED",
-                "screenshot": str(screenshot_path),
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-            }
-        else:
-            print(f"\n❌ Test {test_id} FAILED")
-            self.results[test_id] = {
-                "status": "FAILED",
-                "screenshot": str(screenshot_path),
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-            }
-            print("\n📝 Notes for fixing:")
-            notes = input("Enter notes about what needs to be fixed: ")
-            self.results[test_id]["notes"] = notes
+        # Display screenshot path
+        self.display_screenshot(screenshot_path)
+
+        # Automatically mark as captured
+        print(f"\n✅ Test {test_id} captured successfully")
+        self.results[test_id] = {
+            "status": "CAPTURED",
+            "screenshot": str(screenshot_path),
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
 
         self.save_results()
-        return result
+        return True
 
     def run_loop(self, test_ids: List[str]):
-        """Run the feedback loop for multiple tests."""
+        """Run the automated screenshot capture for multiple tests."""
         print("\n" + "="*60)
-        print("  AUTOMATED TEST FEEDBACK LOOP")
+        print("  AUTOMATED SCREENSHOT CAPTURE")
         print("="*60)
-        print(f"\nRunning {len(test_ids)} tests")
+        print(f"\nCapturing {len(test_ids)} tests")
         print(f"Output directory: {self.output_dir}")
 
         if not self.check_device():
             return
 
-        passed = 0
+        captured = 0
         failed = 0
-        skipped = 0
 
         for i, test_id in enumerate(test_ids, 1):
             print(f"\n\n{'='*60}")
             print(f"  Progress: {i}/{len(test_ids)}")
-            print(f"  Passed: {passed} | Failed: {failed} | Skipped: {skipped}")
+            print(f"  Captured: {captured} | Failed: {failed}")
             print(f"{'='*60}")
 
             result = self.run_single_test(test_id)
 
             if result is True:
-                passed += 1
-            elif result is False:
+                captured += 1
+            else:
                 failed += 1
-                print("\n⚠️  Test failed. Fix the issues and re-run this test.")
-                response = input("Continue to next test? (y/n): ").lower().strip()
-                if response != 'y' and response != 'yes':
-                    break
-            else:  # Skipped
-                skipped += 1
 
         # Final summary
         print(f"\n\n{'='*60}")
-        print("  FINAL RESULTS")
+        print("  CAPTURE COMPLETE")
         print(f"{'='*60}")
         print(f"\nTotal: {len(test_ids)}")
-        print(f"Passed: {passed}")
+        print(f"Captured: {captured}")
         print(f"Failed: {failed}")
-        print(f"Skipped: {skipped}")
         print(f"\nResults saved to: {self.results_file}")
         print(f"Screenshots saved to: {self.screenshots_dir}")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Automated feedback loop for visual testing"
+        description="Automated screenshot capture for visual testing"
     )
     parser.add_argument(
         "--test-id",
