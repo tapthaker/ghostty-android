@@ -36,12 +36,12 @@ font_system.zig (selects font face)
     - Returns CellText with proper atlas position
         ↓
 Vertex Shader (cell_text.v.glsl)
-    - Lines 121-159: Expands quad for decorations
-    - Passes attributes to fragment shader
+    - Keeps glyph-sized quad (no expansion)
+    - Passes attributes and cell position to fragment shader
         ↓
 Fragment Shader (cell_text.f.glsl)
     - Lines 103-105: Handles inverse video
-    - Lines 54-94: Renders decorations
+    - Lines 54-94: Renders decorations over glyph area
     - Lines 233-248: Applies dim effect
 ```
 
@@ -96,25 +96,21 @@ pub const Attributes = packed struct(u16) {
 };
 ```
 
-#### 4. Vertex Shader Quad Expansion
+#### 4. Vertex Shader - No Quad Expansion
 
-For decorations (underline, strikethrough, inverse), the vertex shader expands the quad:
+The vertex shader now keeps the original glyph-sized quad and passes cell position information to the fragment shader:
 
 ```glsl
-// Lines 121-159 in cell_text.v.glsl
-bool expand_to_cell = has_underline || has_strikethrough || has_inverse;
+// cell_text.v.glsl - Simplified approach
+// No quad expansion - decorations are drawn over the glyph area
+// The fragment shader handles decoration rendering within the glyph bounds
 
-if (expand_to_cell) {
-    // Store original glyph bounds for fragment shader
-    out_glyph_bounds = vec4(glyph_start.x, glyph_start.y, glyph_end.x, glyph_end.y);
+// Pass normalized cell position to fragment shader
+out_cell_pos = (vertex_pos - cell_origin) / cell_size;
 
-    // Expand quad to cover entire cell
-    size = cell_size;
-    offset = vec2(0.0, 0.0);
-} else {
-    // Normal glyph-sized quad
-    out_glyph_bounds = vec4(0.0, 0.0, 1.0, 1.0);
-}
+// Keep original glyph quad size
+size = glyph_size;
+offset = glyph_offset;
 ```
 
 #### 5. Fragment Shader Decoration Rendering
@@ -259,8 +255,8 @@ The font atlas is organized in a 2x2 grid:
 ## Performance Characteristics
 
 - **Font Atlas**: Single texture, 2x2 quadrants for 4 styles
-- **Quad Expansion**: Only for cells with decorations (minimal overhead)
-- **Procedural Decorations**: No texture lookups, pure math
+- **No Quad Expansion**: All quads remain glyph-sized (optimal GPU performance)
+- **Procedural Decorations**: Rendered over glyph area, no texture lookups, pure math
 - **Attribute Packing**: 16 bits per cell (very compact)
 
 ## Future Enhancements
