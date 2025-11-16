@@ -58,8 +58,9 @@ pub const FontSystem = struct {
     max_bearing_y: i32, // Maximum top bearing (positive = glyph extends above baseline)
     min_bearing_y: i32, // Minimum top bearing (negative = glyph extends below baseline)
 
-    /// Dynamic atlas layout based on font size
-    glyph_size: u32, // Calculated based on font size
+    /// Dynamic atlas layout based on font size - separate width and height for proper aspect ratio
+    glyph_width: u32, // Width allocated for each glyph in atlas
+    glyph_height: u32, // Height allocated for each glyph in atlas
 
     /// Atlas data per style (using shared atlas for all styles)
     atlas_regular: AtlasData,
@@ -191,11 +192,14 @@ pub const FontSystem = struct {
         const cell_height = metrics.cellHeight();
         const baseline = @as(i32, @intCast(metrics.baseline()));
 
-        // Calculate glyph size: Use cell_height plus padding
-        // Don't round to power of 2 as it causes atlas misalignment
-        const glyph_size = cell_height + ATLAS_PADDING * 2; // Add padding on both sides
+        // Calculate glyph size: Use both cell dimensions plus padding
+        // Keep width and height separate to maintain proper aspect ratio
+        const glyph_width = cell_width + ATLAS_PADDING * 2; // Add padding on both sides
+        const glyph_height = cell_height + ATLAS_PADDING * 2; // Add padding on both sides
 
-        log.info("Font metrics: cell={d}x{d}, baseline={d}, glyph_size={d}", .{ cell_width, cell_height, baseline, glyph_size });
+        log.info("Font metrics: cell={d}x{d}, baseline={d}, glyph_size={d}x{d}", .{
+            cell_width, cell_height, baseline, glyph_width, glyph_height
+        });
 
         // Calculate maximum bearing values across all ASCII printable characters
         var max_bearing_x: i32 = 0;
@@ -212,17 +216,17 @@ pub const FontSystem = struct {
 
             const bearing_x = @as(i32, @intCast(glyph_metrics.*.bitmap_left));
             const bearing_y = @as(i32, @intCast(glyph_metrics.*.bitmap_top));
-            const glyph_width = @as(i32, @intCast(glyph_metrics.*.bitmap.width));
-            const glyph_height = @as(i32, @intCast(glyph_metrics.*.bitmap.rows));
+            const bmp_width = @as(i32, @intCast(glyph_metrics.*.bitmap.width));
+            const bmp_height = @as(i32, @intCast(glyph_metrics.*.bitmap.rows));
 
             // Track maximum extents
             max_bearing_x = @max(max_bearing_x, bearing_x);
             min_bearing_x = @min(min_bearing_x, bearing_x);
             max_bearing_y = @max(max_bearing_y, bearing_y);
-            min_bearing_y = @min(min_bearing_y, bearing_y - glyph_height);
+            min_bearing_y = @min(min_bearing_y, bearing_y - bmp_height);
 
             // Also check right edge overflow (glyph extends past advance width)
-            const right_edge = bearing_x + glyph_width;
+            const right_edge = bearing_x + bmp_width;
             const advance_x = @as(i32, @intCast(glyph_metrics.*.advance.x >> 6));
             if (right_edge > advance_x) {
                 max_bearing_x = @max(max_bearing_x, right_edge - advance_x);
@@ -277,7 +281,8 @@ pub const FontSystem = struct {
             .min_bearing_x = min_bearing_x,
             .max_bearing_y = max_bearing_y,
             .min_bearing_y = min_bearing_y,
-            .glyph_size = glyph_size,
+            .glyph_width = glyph_width,
+            .glyph_height = glyph_height,
             .atlas_regular = atlas_regular,
             .atlas_bold = atlas_bold,
             .atlas_italic = atlas_italic,
@@ -429,15 +434,17 @@ pub const FontSystem = struct {
         const row = index / ATLAS_COLS;
 
         // Base position within the quadrant (including padding)
-        const slot_size = self.glyph_size + ATLAS_PADDING;
-        const base_x: u32 = col * slot_size + ATLAS_PADDING / 2; // Add half padding to start
-        const base_y: u32 = row * slot_size + ATLAS_PADDING / 2;
+        // Use separate width and height for proper slot sizing
+        const slot_width = self.glyph_width + ATLAS_PADDING;
+        const slot_height = self.glyph_height + ATLAS_PADDING;
+        const base_x: u32 = col * slot_width + ATLAS_PADDING / 2; // Add half padding to start
+        const base_y: u32 = row * slot_height + ATLAS_PADDING / 2;
 
         // Calculate number of rows needed for all characters in one style
         const num_chars: u32 = 95 + @as(u32, @intCast(UNICODE_CHARS.len));
         const num_rows: u32 = (num_chars + ATLAS_COLS - 1) / ATLAS_COLS;
-        const quadrant_width = ATLAS_COLS * slot_size;
-        const quadrant_height = num_rows * slot_size;
+        const quadrant_width = ATLAS_COLS * slot_width;
+        const quadrant_height = num_rows * slot_height;
 
         // Offset based on style (organize in 2x2 grid)
         const style_offset: [2]u32 = switch (style) {
@@ -496,7 +503,7 @@ pub const FontSystem = struct {
 
         // Y offset: Position relative to baseline
         // Place baseline at a consistent position within the slot (3/4 down from top)
-        const baseline_pos = (self.glyph_size * 3) / 4;
+        const baseline_pos = (self.glyph_height * 3) / 4;
         // bearing_y (bitmap_top) is the distance from baseline to top of bitmap
         // y_offset positions the top of the bitmap relative to the slot top
         const y_offset = baseline_pos - @as(u32, @intCast(bearing_y));
@@ -507,14 +514,14 @@ pub const FontSystem = struct {
             const atlas_y = atlas_pos[1] + y_offset + y;
             if (atlas_y >= atlas_height) break;
             // Don't render beyond our allocated slot
-            if (y_offset + y >= self.glyph_size) break;
+            if (y_offset + y >= self.glyph_height) break;
 
             var x: u32 = 0;
             while (x < bmp_width) : (x += 1) {
                 const atlas_x = atlas_pos[0] + x_offset + x;
                 if (atlas_x >= atlas_width) break;
                 // Don't render beyond our allocated slot
-                if (x_offset + x >= self.glyph_size) break;
+                if (x_offset + x >= self.glyph_width) break;
 
                 const atlas_index = atlas_y * atlas_width + atlas_x;
                 const bmp_index = y * bmp_width + x;
@@ -573,7 +580,7 @@ pub const FontSystem = struct {
 
         // Y offset: Position relative to baseline
         // Place baseline at a consistent position within the slot (3/4 down from top)
-        const baseline_pos = (self.glyph_size * 3) / 4;
+        const baseline_pos = (self.glyph_height * 3) / 4;
         // bearing_y (bitmap_top) is the distance from baseline to top of bitmap
         // y_offset positions the top of the bitmap relative to the slot top
         const y_offset = baseline_pos - @as(u32, @intCast(bearing_y));
@@ -584,14 +591,14 @@ pub const FontSystem = struct {
             const atlas_y = atlas_pos[1] + y_offset + y;
             if (atlas_y >= atlas_height) break;
             // Don't render beyond our allocated slot
-            if (y_offset + y >= self.glyph_size) break;
+            if (y_offset + y >= self.glyph_height) break;
 
             var x: u32 = 0;
             while (x < bmp_width) : (x += 1) {
                 const atlas_x = atlas_pos[0] + x_offset + x;
                 if (atlas_x >= atlas_width) break;
                 // Don't render beyond our allocated slot
-                if (x_offset + x >= self.glyph_size) break;
+                if (x_offset + x >= self.glyph_width) break;
 
                 const atlas_index = atlas_y * atlas_width + atlas_x;
                 const bmp_index = y * bmp_width + x;
@@ -644,7 +651,7 @@ pub const FontSystem = struct {
 
         return shaders.CellText{
             .glyph_pos = atlas_pos,
-            .glyph_size = .{ self.glyph_size, self.glyph_size },
+            .glyph_size = .{ self.glyph_width, self.glyph_height },
             .bearings = bearings, // Use actual bearings for accurate positioning
             .grid_pos = .{ grid_col, grid_row },
             .color = color,
@@ -663,9 +670,10 @@ pub const FontSystem = struct {
         const num_rows: u32 = (num_chars + ATLAS_COLS - 1) / ATLAS_COLS; // Ceiling division
 
         // Single quadrant dimensions (including padding)
-        const slot_size: u32 = self.glyph_size + ATLAS_PADDING;
-        const quadrant_width: u32 = ATLAS_COLS * slot_size;
-        const quadrant_height: u32 = num_rows * slot_size;
+        const slot_width: u32 = self.glyph_width + ATLAS_PADDING;
+        const slot_height: u32 = self.glyph_height + ATLAS_PADDING;
+        const quadrant_width: u32 = ATLAS_COLS * slot_width;
+        const quadrant_height: u32 = num_rows * slot_height;
 
         // Total atlas is 2x2 grid of quadrants (4 styles)
         const width: u32 = quadrant_width * 2;
