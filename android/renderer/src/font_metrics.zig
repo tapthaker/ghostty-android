@@ -59,7 +59,7 @@ pub const FontSize = struct {
     /// Get default font size for terminal
     pub fn default(dpi: u16) FontSize {
         return .{
-            .points = 20.0, // 20pt default - larger font size for better visibility
+            .points = 10.0, // 10pt default - balanced for mobile screens with high DPI
             .dpi = dpi,
         };
     }
