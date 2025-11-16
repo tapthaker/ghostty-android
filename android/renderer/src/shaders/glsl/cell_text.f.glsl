@@ -1,5 +1,6 @@
 #include "common.glsl"
 
+
 // OpenGL ES uses sampler2D instead of sampler2DRect
 // Texture coordinates must be normalized (0.0 to 1.0)
 // Note: OpenGL ES 3.1 doesn't support layout(binding) for samplers
@@ -85,21 +86,16 @@ bool isUnderline(uint underline_type, vec2 cell_coord) {
     return false;
 }
 
-// Check if we should draw strikethrough at this pixel
-bool isStrikethrough(vec2 cell_coord) {
-    float y = cell_coord.y;
-    float line_thickness = 0.04; // 4% of cell height (thinner line)
-    float strike_pos = 0.52; // Slightly above center for better alignment with text
-    return (y >= strike_pos && y <= strike_pos + line_thickness);
-}
 
 void main() {
     bool use_linear_blending = (bools & USE_LINEAR_BLENDING) != 0u;
     bool use_linear_correction = (bools & USE_LINEAR_CORRECTION) != 0u;
 
-    // Extract attribute flags first
-    // TESTING: Disable inverse video
-    bool is_inverse = false; // (out_attributes & ATTR_INVERSE) != 0u;
+    // Extract attribute flags
+    bool is_inverse = (out_attributes & ATTR_INVERSE) != 0u;
+    bool is_dim = (out_attributes & ATTR_DIM) != 0u;
+    bool is_strikethrough = (out_attributes & ATTR_STRIKETHROUGH) != 0u;
+    uint underline_type = (out_attributes & ATTR_UNDERLINE_MASK) >> ATTR_UNDERLINE_SHIFT;
 
     // Swap colors for inverse video BEFORE rendering
     vec4 fg_color = is_inverse ? out_bg_color : out_color;
@@ -128,10 +124,8 @@ void main() {
 
     // Only sample texture if we're within the glyph bounds
     if (in_glyph) {
-        // Calculate the correct texture coordinate based on position within glyph
-        // Map our position within the cell to position within the glyph, then to atlas coords
-        vec2 glyph_local_coord = (out_cell_coord - out_glyph_bounds.xy) / (out_glyph_bounds.zw - out_glyph_bounds.xy);
-        vec2 tex_coord = vec2(out_glyph_pos) + glyph_local_coord * vec2(out_glyph_size);
+        // Simple texture sampling - use interpolated coordinates from vertex shader
+        vec2 tex_coord = out_tex_coord;
 
         switch (out_atlas) {
             case ATLAS_GRAYSCALE:
@@ -227,11 +221,7 @@ void main() {
     }
 
     // Apply remaining text attributes
-    bool is_dim = (out_attributes & ATTR_DIM) != 0u;
-    // TESTING: Disable strikethrough
-    bool is_strikethrough = false; // (out_attributes & ATTR_STRIKETHROUGH) != 0u;
-    // TESTING: Disable underline
-    uint underline_type = 0u; // (out_attributes & ATTR_UNDERLINE_MASK) >> ATTR_UNDERLINE_SHIFT;
+    // (is_dim, is_strikethrough, underline_type are declared at the top of main())
 
     // Apply dim (reduce brightness by 50%)
     if (is_dim) {
@@ -241,15 +231,8 @@ void main() {
     // Bold and italic are now handled by using actual bold/italic glyphs from the atlas
     // No need for synthetic brightness adjustment
 
-    // Check if we should draw underline or strikethrough
-    // TESTING: Disable ALL decorations (underline, strikethrough, reverse video)
-    bool draw_underline = false; // isUnderline(underline_type, out_cell_coord);
-    bool draw_strikethrough = false; // is_strikethrough && isStrikethrough(out_cell_coord);
-
-    // Draw underline or strikethrough by setting full opacity at those pixels
-    if (draw_underline || draw_strikethrough) {
-        final_color = fg_color; // Use foreground color for lines (respects inverse)
-    }
+    // Decorations like strikethrough and underline are rendered as separate sprites
+    // following Ghostty's approach, not drawn in the text shader
 
     out_FragColor = final_color;
 }

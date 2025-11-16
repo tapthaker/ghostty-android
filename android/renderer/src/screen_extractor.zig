@@ -76,8 +76,8 @@ pub fn extractCells(
     while (row < rows) : (row += 1) {
         var col: usize = 0;
         while (col < cols) : (col += 1) {
-            // Pin to the active screen coordinates
-            const pin = screen.pages.pin(.{ .active = .{
+            // Pin to the viewport coordinates (tests write to viewport)
+            const pin = screen.pages.pin(.{ .viewport = .{
                 .x = @intCast(col),
                 .y = @intCast(row),
             } }) orelse {

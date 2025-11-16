@@ -65,6 +65,17 @@ pub const FontSystem = struct {
     /// Common Unicode characters beyond ASCII (for terminal emulation)
     const UNICODE_CHARS = [_]u21{
         0x2588, // █ Full block (used in 256 color tests, progress bars, etc.)
+        0x2500, // ─ Box drawing light horizontal (for strikethrough)
+        0x2502, // │ Box drawing light vertical
+        0x250C, // ┌ Box drawing light down and right
+        0x2510, // ┐ Box drawing light down and left
+        0x2514, // └ Box drawing light up and right
+        0x2518, // ┘ Box drawing light up and left
+        0x251C, // ├ Box drawing light vertical and right
+        0x2524, // ┤ Box drawing light vertical and left
+        0x252C, // ┬ Box drawing light down and horizontal
+        0x2534, // ┴ Box drawing light up and horizontal
+        0x253C, // ┼ Box drawing light vertical and horizontal
     };
 
     pub fn init(allocator: std.mem.Allocator, font_size_px: u32) !FontSystem {

@@ -117,47 +117,15 @@ void main() {
     // the y offset. The X bearing is the distance from the left of the cell
     // to the left of the glyph, so it works as the x offset directly.
 
-    // Check if we need to expand quad to full cell for decorations
-    // TESTING: Disable underline, strikethrough, and inverse - no quad expansion needed
-    uint underline_type = 0u; // (glyph_attributes & ATTR_UNDERLINE_MASK) >> ATTR_UNDERLINE_SHIFT;
-    bool has_underline = false; // underline_type != 0u;
-    bool has_strikethrough = false; // (glyph_attributes & ATTR_STRIKETHROUGH) != 0u;
-    bool has_inverse = false; // (glyph_attributes & ATTR_INVERSE) != 0u;
-    bool expand_to_cell = false; // has_underline || has_strikethrough || has_inverse;
-
+    // Simple glyph rendering - no quad expansion
     vec2 size = vec2(glyph_size);
     vec2 offset = vec2(bearings);
     offset.y = cell_size.y - offset.y;
 
-    // For underline, strikethrough, or inverse video, expand quad to cover entire cell
-    if (expand_to_cell) {
-        // Store original glyph info (offset already has the correct position)
-        vec2 glyph_size_vec = size;
-        vec2 glyph_offset = offset; // This is already the top-left corner of the glyph
-
-        // Calculate glyph bounds within cell (0.0-1.0 coordinates)
-        // offset is already the correct top-left position of the glyph
-        vec2 glyph_start = glyph_offset / cell_size;
-        vec2 glyph_end = (glyph_offset + glyph_size_vec) / cell_size;
-        out_glyph_bounds = vec4(glyph_start.x, glyph_start.y, glyph_end.x, glyph_end.y);
-
-        // Expand size to full cell
-        size = cell_size;
-        offset = vec2(0.0, 0.0);
-
-        // Don't set out_tex_coord here - it will be calculated in fragment shader
-        // based on position within glyph bounds
-        out_tex_coord = vec2(0.0); // Unused for expanded quads
-
-        // Cell coord is the corner position in cell space
-        out_cell_coord = corner;
-    } else {
-        // Normal glyph rendering - quad sized to glyph
-        // No need for bounds check, glyph fills entire quad
-        out_glyph_bounds = vec4(0.0, 0.0, 1.0, 1.0);
-        out_tex_coord = vec2(glyph_pos) + vec2(glyph_size) * corner;
-        out_cell_coord = corner;
-    }
+    // All glyphs render normally without expansion
+    out_glyph_bounds = vec4(0.0, 0.0, 1.0, 1.0);
+    out_tex_coord = vec2(glyph_pos) + vec2(glyph_size) * corner;
+    out_cell_coord = corner;
 
     // Calculate the final position of the cell
     cell_pos = cell_pos + size * corner + offset;

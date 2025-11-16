@@ -645,6 +645,30 @@ pub fn syncFromTerminal(self: *Self) !void {
                 cell.fg_color,
                 attributes,
             ));
+
+            // Following Ghostty's approach: render strikethrough as a separate sprite
+            if (cell.strikethrough) {
+                // Use box drawing character like Ghostty does
+                const strikethrough_char: u32 = 0x2500; // ─ (box drawing light horizontal)
+
+                // Create attributes without strikethrough to avoid infinite recursion
+                const line_attributes = shaders.CellText.Attributes{
+                    .bold = false,
+                    .italic = false,
+                    .dim = false,
+                    .strikethrough = false,
+                    .underline = .none,
+                    .inverse = false,
+                };
+
+                try text_glyphs.append(self.allocator, self.font_system.makeCellText(
+                    strikethrough_char,
+                    cell.col,
+                    cell.row,
+                    cell.fg_color,
+                    line_attributes,
+                ));
+            }
         } else {
             skipped_count += 1;
         }
