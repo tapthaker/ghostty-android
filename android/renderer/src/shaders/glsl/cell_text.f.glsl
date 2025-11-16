@@ -219,5 +219,17 @@ void main() {
     // Decorations like strikethrough and underline are rendered as separate sprites
     // following Ghostty's approach, not drawn in the text shader
 
+    // DEBUG: Cell boundary visualization
+    // Draw only left and top borders to avoid overlap between adjacent cells
+    // This helps debug cell overlap and positioning issues
+
+    float border_thickness = 0.01; // 1% of cell size for thinner border
+    // Only draw left and top borders to avoid overlap
+    if (out_cell_coord.x < border_thickness || out_cell_coord.y < border_thickness) {
+        // Draw a semi-transparent red border
+        final_color = mix(final_color, vec4(1.0, 0.0, 0.0, 0.3), 0.7);
+    }
+
+
     out_FragColor = final_color;
 }
