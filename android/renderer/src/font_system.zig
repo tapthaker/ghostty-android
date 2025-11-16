@@ -65,7 +65,7 @@ pub const FontSystem = struct {
     /// Common Unicode characters beyond ASCII (for terminal emulation)
     const UNICODE_CHARS = [_]u21{
         0x2588, // █ Full block (used in 256 color tests, progress bars, etc.)
-        0x2500, // ─ Box drawing light horizontal (for strikethrough)
+        0x2500, // ─ Box drawing light horizontal (for strikethrough/dashed underline)
         0x2502, // │ Box drawing light vertical
         0x250C, // ┌ Box drawing light down and right
         0x2510, // ┐ Box drawing light down and left
@@ -76,6 +76,10 @@ pub const FontSystem = struct {
         0x252C, // ┬ Box drawing light down and horizontal
         0x2534, // ┴ Box drawing light up and horizontal
         0x253C, // ┼ Box drawing light vertical and horizontal
+        0x2550, // ═ Box drawing double horizontal (for double underline)
+        0x223C, // ∼ Tilde operator (for curly/wavy underline)
+        0x2026, // … Horizontal ellipsis (for dotted underline)
+        0x2581, // ▁ Lower one eighth block (for single underline)
     };
 
     pub fn init(allocator: std.mem.Allocator, font_size_px: u32) !FontSystem {

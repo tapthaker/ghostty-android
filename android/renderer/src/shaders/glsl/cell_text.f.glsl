@@ -107,21 +107,6 @@ void main() {
 
     vec4 final_color;
 
-    // DEBUG MODE: Visualize glyph bounds and coordinates
-    // Uncomment to enable debug visualization
-    // if (in_glyph) {
-    //     // Green: inside glyph bounds
-    //     out_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
-    // } else {
-    //     // Red: outside glyph bounds
-    //     out_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
-    // }
-    // // Visualize cell coordinates as colors
-    // out_FragColor = vec4(out_cell_coord.x, out_cell_coord.y, 0.0, 1.0);
-    // // Visualize glyph bounds
-    // out_FragColor = vec4(out_glyph_bounds.x, out_glyph_bounds.y, out_glyph_bounds.z, 1.0);
-    // return;
-
     // Only sample texture if we're within the glyph bounds
     if (in_glyph) {
         // Simple texture sampling - use interpolated coordinates from vertex shader

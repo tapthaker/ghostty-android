@@ -638,6 +638,31 @@ pub fn syncFromTerminal(self: *Self) !void {
                 .inverse = cell.inverse,
             };
 
+            // For inverse video, render a background rectangle first
+            if (cell.inverse) {
+                // Render a full block character as background with swapped colors
+                const block_char: u32 = 0x2588; // █ Full block character
+
+                // Create attributes without inverse (we're manually swapping colors)
+                const bg_attributes = shaders.CellText.Attributes{
+                    .bold = false,
+                    .italic = false,
+                    .dim = false,
+                    .strikethrough = false,
+                    .underline = .none,
+                    .inverse = false,
+                };
+
+                // Render the background block with original foreground color (which becomes background in inverse)
+                try text_glyphs.append(self.allocator, self.font_system.makeCellText(
+                    @intCast(block_char),
+                    cell.col,
+                    cell.row,
+                    cell.fg_color, // Use fg color for the background block
+                    bg_attributes,
+                ));
+            }
+
             try text_glyphs.append(self.allocator, self.font_system.makeCellText(
                 cell.codepoint,
                 cell.col,
@@ -646,12 +671,14 @@ pub fn syncFromTerminal(self: *Self) !void {
                 attributes,
             ));
 
-            // Following Ghostty's approach: render strikethrough as a separate sprite
+            // Following Ghostty's approach: render decorations as separate sprites
+
+            // Render strikethrough as a separate sprite
             if (cell.strikethrough) {
                 // Use box drawing character like Ghostty does
                 const strikethrough_char: u32 = 0x2500; // ─ (box drawing light horizontal)
 
-                // Create attributes without strikethrough to avoid infinite recursion
+                // Create attributes without decorations to avoid infinite recursion
                 const line_attributes = shaders.CellText.Attributes{
                     .bold = false,
                     .italic = false,
@@ -662,7 +689,39 @@ pub fn syncFromTerminal(self: *Self) !void {
                 };
 
                 try text_glyphs.append(self.allocator, self.font_system.makeCellText(
-                    strikethrough_char,
+                    @intCast(strikethrough_char),
+                    cell.col,
+                    cell.row,
+                    cell.fg_color,
+                    line_attributes,
+                ));
+            }
+
+            // Render underline as a separate sprite
+            if (cell.underline != .none) {
+                // Choose appropriate underline character based on style
+                // Note: These are approximations since we don't have dedicated underline sprites
+                const underline_char: u32 = switch (cell.underline) {
+                    .none => unreachable,
+                    .single => 0x2581, // ▁ (lower one eighth block - positioned at bottom)
+                    .double => 0x2550, // ═ (box drawing double horizontal)
+                    .curly => 0x223C, // ∼ (tilde operator, for wavy)
+                    .dotted => 0x2026, // … (horizontal ellipsis for dotted effect)
+                    .dashed => 0x2500, // ─ (box drawing light horizontal)
+                };
+
+                // Create attributes without decorations to avoid infinite recursion
+                const line_attributes = shaders.CellText.Attributes{
+                    .bold = false,
+                    .italic = false,
+                    .dim = false,
+                    .strikethrough = false,
+                    .underline = .none,
+                    .inverse = false,
+                };
+
+                try text_glyphs.append(self.allocator, self.font_system.makeCellText(
+                    @intCast(underline_char),
                     cell.col,
                     cell.row,
                     cell.fg_color,
