@@ -321,6 +321,7 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Se
             .use_linear_blending = false,
             .use_linear_correction = false,
         },
+        .font_decoration_metrics = font_system.getDecorationMetrics(), // Font-based decoration positions
     };
 
     log.info("Cell size from font: {d}x{d}", .{ uniforms.cell_size[0], uniforms.cell_size[1] });
@@ -576,14 +577,44 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
 
     log.info("Atlas dimensions buffer updated", .{});
 
-    // 7. Update cell size in uniforms
+    // 7. Update cell size and decoration metrics in uniforms
     const cell_size = self.font_system.getCellSize();
     self.uniforms.cell_size = cell_size;
-    try self.uniforms_buffer.sync(&[_]shaders.Uniforms{self.uniforms});
+    self.uniforms.font_decoration_metrics = self.font_system.getDecorationMetrics(); // Update decoration metrics
 
     log.info("Cell size updated to: {}x{}", .{ cell_size[0], cell_size[1] });
 
-    // 8. Regenerate test glyphs with new font system
+    // 8. Recalculate grid dimensions based on new cell size
+    const new_cell_width = @as(u32, @intFromFloat(cell_size[0]));
+    const new_cell_height = @as(u32, @intFromFloat(cell_size[1]));
+
+    const grid = font_metrics.GridCalculator.calculate(
+        self.width,
+        self.height,
+        new_cell_width,
+        new_cell_height,
+        80,  // min_cols
+        24   // min_rows
+    );
+
+    // Only resize terminal if dimensions actually changed
+    if (grid.cols != self.grid_cols or grid.rows != self.grid_rows) {
+        log.info("Font size change: resizing terminal {d}x{d} → {d}x{d}", .{
+            self.grid_cols, self.grid_rows, grid.cols, grid.rows
+        });
+
+        try self.terminal_manager.resize(grid.cols, grid.rows);
+        self.grid_cols = grid.cols;
+        self.grid_rows = grid.rows;
+
+        // Update grid size in uniforms
+        self.uniforms.grid_size_packed_2u16 = shaders.Uniforms.pack2u16(grid.cols, grid.rows);
+    }
+
+    // Sync all uniform changes
+    try self.uniforms_buffer.sync(&[_]shaders.Uniforms{self.uniforms});
+
+    // 9. Regenerate test glyphs with new font system
     const test_string = "Hello World!";
     var test_glyphs: [test_string.len]shaders.CellText = undefined;
 

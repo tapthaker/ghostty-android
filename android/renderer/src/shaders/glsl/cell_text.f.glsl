@@ -56,31 +56,37 @@ bool isUnderline(uint underline_type, vec2 cell_coord) {
     if (underline_type == UNDERLINE_NONE) return false;
 
     float y = cell_coord.y;
-    float line_thickness = 0.04; // 4% of cell height (thinner line)
-    float underline_pos = 0.88;  // Position at 88% down the cell
+    // Use font metrics from uniforms
+    float underline_pos = font_decoration_metrics.x;     // Underline position from font metrics
+    float line_thickness = font_decoration_metrics.y;    // Underline thickness from font metrics
 
     if (underline_type == UNDERLINE_SINGLE) {
         return (y >= underline_pos && y <= underline_pos + line_thickness);
     } else if (underline_type == UNDERLINE_DOUBLE) {
-        float line1_pos = 0.82;
-        float line2_pos = 0.92;
+        // Position double underlines relative to the base position
+        float spacing = line_thickness * 2.0; // Space between lines
+        float line1_pos = underline_pos - spacing;
+        float line2_pos = underline_pos + spacing;
         return (y >= line1_pos && y <= line1_pos + line_thickness) ||
                (y >= line2_pos && y <= line2_pos + line_thickness);
     } else if (underline_type == UNDERLINE_DOTTED) {
         if (y < underline_pos || y > underline_pos + line_thickness) return false;
         // Create dotted pattern based on x coordinate
-        float dot_period = 0.15; // Dots every 15% of cell width
+        float dot_period = line_thickness * 3.0; // Dots every 3x thickness
         float x_mod = mod(cell_coord.x, dot_period);
         return x_mod < dot_period * 0.4; // Dot is 40% of period
     } else if (underline_type == UNDERLINE_DASHED) {
         if (y < underline_pos || y > underline_pos + line_thickness) return false;
         // Create dashed pattern
-        float dash_period = 0.25;
+        float dash_period = line_thickness * 5.0; // Dashes every 5x thickness
         float x_mod = mod(cell_coord.x, dash_period);
         return x_mod < dash_period * 0.6; // Dash is 60% of period
     } else if (underline_type == UNDERLINE_CURLY) {
         // Simplified curly underline as wavy line
-        float wave_y = underline_pos + sin(cell_coord.x * 20.0) * 0.03;
+        // Wave frequency relative to cell width
+        float wave_freq = 3.14159 * 6.0; // About 3 waves per cell
+        float wave_amplitude = line_thickness * 1.5;
+        float wave_y = underline_pos + sin(cell_coord.x * wave_freq) * wave_amplitude;
         return (y >= wave_y && y <= wave_y + line_thickness);
     }
     return false;
@@ -89,8 +95,9 @@ bool isUnderline(uint underline_type, vec2 cell_coord) {
 // Check if we should draw strikethrough at this pixel
 bool isStrikethrough(vec2 cell_coord) {
     float y = cell_coord.y;
-    float line_thickness = 0.04; // 4% of cell height
-    float strikethrough_pos = 0.45; // Position at 45% down the cell (middle)
+    // Use font metrics from uniforms
+    float strikethrough_pos = font_decoration_metrics.z;  // Strikethrough position from font metrics
+    float line_thickness = font_decoration_metrics.w;     // Decoration thickness from font metrics
 
     return (y >= strikethrough_pos && y <= strikethrough_pos + line_thickness);
 }

@@ -48,6 +48,14 @@ pub const Uniforms = extern struct {
     /// Various booleans, in a packed struct for space efficiency.
     bools: Bools align(4),
 
+    /// Font metrics for text decorations (underline, strikethrough)
+    /// Values are in relative units (0.0 to 1.0 of cell height)
+    /// [0] = underline_position (distance from top, 0.0=top, 1.0=bottom)
+    /// [1] = underline_thickness (thickness as fraction of cell height)
+    /// [2] = strikethrough_position (distance from top)
+    /// [3] = decoration_thickness (general thickness for decorations)
+    font_decoration_metrics: [4]f32 align(16),
+
     pub const Bools = packed struct(u32) {
         /// Whether the cursor is 2 cells wide.
         cursor_wide: bool,

@@ -59,7 +59,7 @@ pub const FontSize = struct {
     /// Get default font size for terminal
     pub fn default(dpi: u16) FontSize {
         return .{
-            .points = 10.0, // 10pt default - balanced for mobile screens with high DPI
+            .points = 10.0, // 10pt default size for terminal
             .dpi = dpi,
         };
     }
@@ -199,7 +199,7 @@ pub fn extractMetrics(face: freetype.Face, font_size: FontSize) !FontMetrics {
     // for proper character spacing in a terminal grid
 
     // Use FreeType's max_advance for monospace fonts
-    // This is the standard width that all characters should occupy
+    // This ensures all characters (including special/unicode) will fit properly
     max_width = @as(f32, @floatFromInt(ft_metrics.max_advance)) / 64.0;
 
     // Verify this is actually a monospace font by checking a few characters
@@ -323,6 +323,8 @@ pub const GridCalculator = struct {
     }
 
     /// Calculate font size needed to fit desired grid
+    /// NOTE: This is an estimation function used before font metrics are available.
+    /// Once the font is loaded, actual metrics should be used instead.
     pub fn fontSizeForGrid(
         screen_width: u32,
         screen_height: u32,
@@ -334,33 +336,18 @@ pub const GridCalculator = struct {
         const cell = cellSizeFromGrid(screen_width, screen_height, desired_cols, desired_rows);
 
         // Estimate font size from cell height
-        // Typical ratio: cell_height = font_size * 1.2 to 1.5
-        // We'll use 1.35 as a good middle ground
-        const estimated_pixels = @as(f32, @floatFromInt(cell.height)) / 1.35;
+        // For JetBrains Mono (our default font), the typical ratio between
+        // cell height and font size in pixels is approximately 1.4
+        // This accounts for ascender, descender, and line gap.
+        // cell_height ≈ font_size_pixels * 1.4
+        // Therefore: font_size_pixels ≈ cell_height / 1.4
+        const JETBRAINS_MONO_RATIO: f32 = 1.4;
+        const estimated_pixels = @as(f32, @floatFromInt(cell.height)) / JETBRAINS_MONO_RATIO;
 
         return FontSize.fromPixels(estimated_pixels, dpi);
     }
 };
 
-/// Configuration for font and grid system
-pub const Config = struct {
-    /// Default font size in points
-    default_font_size: f32 = 10.0,
-
-    /// Minimum grid dimensions
-    min_cols: u16 = 80,
-    min_rows: u16 = 24,
-
-    /// Maximum grid dimensions
-    max_cols: u16 = 512,
-    max_rows: u16 = 512,
-
-    /// Whether to prefer exact grid fit over font size
-    prefer_grid_fit: bool = false,
-
-    /// Line height multiplier (1.0 = tight, 1.5 = loose)
-    line_height_multiplier: f32 = 1.2,
-};
 
 // Tests
 test "FontSize conversions" {

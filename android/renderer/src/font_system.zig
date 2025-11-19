@@ -62,6 +62,9 @@ pub const FontSystem = struct {
     glyph_width: u32, // Width allocated for each glyph in atlas
     glyph_height: u32, // Height allocated for each glyph in atlas
 
+    /// Padding between glyphs (proportional to font size)
+    atlas_padding: u32,
+
     /// Atlas data per style (using shared atlas for all styles)
     atlas_regular: AtlasData,
     atlas_bold: AtlasData,
@@ -70,7 +73,6 @@ pub const FontSystem = struct {
 
     // Constants must come after all fields
     const ATLAS_COLS = 16; // 16 characters per row
-    const ATLAS_PADDING = 2; // Padding between glyphs to prevent bleeding
 
     /// Common Unicode characters beyond ASCII (for terminal emulation)
     const UNICODE_CHARS = [_]u21{
@@ -192,10 +194,22 @@ pub const FontSystem = struct {
         const cell_height = metrics.cellHeight();
         const baseline = @as(i32, @intCast(metrics.baseline()));
 
+        // Calculate padding based on font metrics to prevent glyph bleeding
+        // Use the maximum of underline thickness or 1/16 of cell height (whichever is larger)
+        // This ensures padding scales appropriately with font size
+        const min_padding: u32 = 1; // Always at least 1 pixel
+        const thickness_based = @max(min_padding, @as(u32, @intFromFloat(@ceil(metrics.underline_thickness))));
+        const height_based = @max(min_padding, cell_height / 16); // 1/16 of cell height
+        const atlas_padding = @max(thickness_based, height_based);
+
+        log.debug("Atlas padding calculation: underline_thickness={d:.2}, cell_height={d}, padding={d}", .{
+            metrics.underline_thickness, cell_height, atlas_padding
+        });
+
         // Calculate glyph size: Use both cell dimensions plus padding
         // Keep width and height separate to maintain proper aspect ratio
-        const glyph_width = cell_width + ATLAS_PADDING * 2; // Add padding on both sides
-        const glyph_height = cell_height + ATLAS_PADDING * 2; // Add padding on both sides
+        const glyph_width = cell_width + atlas_padding * 2; // Add padding on both sides
+        const glyph_height = cell_height + atlas_padding * 2; // Add padding on both sides
 
         log.info("Font metrics: cell={d}x{d}, baseline={d}, glyph_size={d}x{d}", .{
             cell_width, cell_height, baseline, glyph_width, glyph_height
@@ -283,6 +297,7 @@ pub const FontSystem = struct {
             .min_bearing_y = min_bearing_y,
             .glyph_width = glyph_width,
             .glyph_height = glyph_height,
+            .atlas_padding = atlas_padding,
             .atlas_regular = atlas_regular,
             .atlas_bold = atlas_bold,
             .atlas_italic = atlas_italic,
@@ -329,6 +344,36 @@ pub const FontSystem = struct {
         return .{
             @as(f32, @floatFromInt(self.cell_width)),
             @as(f32, @floatFromInt(self.cell_height)),
+        };
+    }
+
+    /// Get decoration metrics for text decorations (underlines, strikethrough)
+    /// Returns relative positions (0.0 to 1.0 of cell height)
+    pub fn getDecorationMetrics(self: FontSystem) [4]f32 {
+        const cell_height_f = @as(f32, @floatFromInt(self.cell_height));
+
+        // Calculate relative positions based on font metrics
+        // Underline should be below the baseline, near descender
+        // Using baseline and descender to position underline correctly
+        const baseline_from_top = @as(f32, @floatFromInt(self.baseline));
+        const underline_from_baseline = @max(2.0, self.metrics.underline_thickness); // At least 2 pixels below baseline
+        const underline_pos = (baseline_from_top + underline_from_baseline) / cell_height_f;
+
+        // Underline thickness relative to cell height
+        const thickness = @max(self.metrics.underline_thickness, 1.0) / cell_height_f;
+
+        // Strikethrough should be at x-height (middle of lowercase letters)
+        // If x_height is not available, use middle of cell
+        const strikethrough_pos = if (self.metrics.x_height > 0)
+            (baseline_from_top - self.metrics.x_height / 2.0) / cell_height_f
+        else
+            0.45; // Fallback to 45% from top
+
+        return .{
+            @min(@max(underline_pos, 0.0), 1.0),     // Underline position (clamped)
+            @min(@max(thickness, 0.02), 0.1),         // Underline thickness (min 2%, max 10%)
+            @min(@max(strikethrough_pos, 0.0), 1.0),  // Strikethrough position (clamped)
+            @min(@max(thickness, 0.02), 0.1),         // General decoration thickness
         };
     }
 
@@ -433,12 +478,12 @@ pub const FontSystem = struct {
         const col = index % ATLAS_COLS;
         const row = index / ATLAS_COLS;
 
-        // Base position within the quadrant (including padding)
-        // Use separate width and height for proper slot sizing
-        const slot_width = self.glyph_width + ATLAS_PADDING;
-        const slot_height = self.glyph_height + ATLAS_PADDING;
-        const base_x: u32 = col * slot_width + ATLAS_PADDING / 2; // Add half padding to start
-        const base_y: u32 = row * slot_height + ATLAS_PADDING / 2;
+        // Base position within the quadrant
+        // glyph_width/height already include padding, so don't add it again to slot size
+        const slot_width = self.glyph_width;
+        const slot_height = self.glyph_height;
+        const base_x: u32 = col * slot_width + self.atlas_padding; // Center in slot
+        const base_y: u32 = row * slot_height + self.atlas_padding;
 
         // Calculate number of rows needed for all characters in one style
         const num_chars: u32 = 95 + @as(u32, @intCast(UNICODE_CHARS.len));
@@ -502,8 +547,12 @@ pub const FontSystem = struct {
             0; // Clamp negative bearings to prevent underflow
 
         // Y offset: Position relative to baseline
-        // Place baseline at a consistent position within the slot (3/4 down from top)
-        const baseline_pos = (self.glyph_height * 3) / 4;
+        // Use actual font metrics to position baseline correctly
+        // baseline_pos = position of baseline from top of slot
+        // We want the baseline to be positioned based on ascent ratio
+        const total_height = self.metrics.ascent - self.metrics.descent;
+        const ascent_ratio = self.metrics.ascent / total_height;
+        const baseline_pos = @as(u32, @intFromFloat(@as(f32, @floatFromInt(self.glyph_height)) * ascent_ratio));
         // bearing_y (bitmap_top) is the distance from baseline to top of bitmap
         // y_offset positions the top of the bitmap relative to the slot top
         const y_offset = baseline_pos - @as(u32, @intCast(bearing_y));
@@ -579,8 +628,12 @@ pub const FontSystem = struct {
             0; // Clamp negative bearings to prevent underflow
 
         // Y offset: Position relative to baseline
-        // Place baseline at a consistent position within the slot (3/4 down from top)
-        const baseline_pos = (self.glyph_height * 3) / 4;
+        // Use actual font metrics to position baseline correctly
+        // baseline_pos = position of baseline from top of slot
+        // We want the baseline to be positioned based on ascent ratio
+        const total_height = self.metrics.ascent - self.metrics.descent;
+        const ascent_ratio = self.metrics.ascent / total_height;
+        const baseline_pos = @as(u32, @intFromFloat(@as(f32, @floatFromInt(self.glyph_height)) * ascent_ratio));
         // bearing_y (bitmap_top) is the distance from baseline to top of bitmap
         // y_offset positions the top of the bitmap relative to the slot top
         const y_offset = baseline_pos - @as(u32, @intCast(bearing_y));
@@ -669,9 +722,9 @@ pub const FontSystem = struct {
         const num_chars: u32 = 95 + @as(u32, @intCast(UNICODE_CHARS.len));
         const num_rows: u32 = (num_chars + ATLAS_COLS - 1) / ATLAS_COLS; // Ceiling division
 
-        // Single quadrant dimensions (including padding)
-        const slot_width: u32 = self.glyph_width + ATLAS_PADDING;
-        const slot_height: u32 = self.glyph_height + ATLAS_PADDING;
+        // Single quadrant dimensions (glyph_width/height already include padding)
+        const slot_width: u32 = self.glyph_width;
+        const slot_height: u32 = self.glyph_height;
         const quadrant_width: u32 = ATLAS_COLS * slot_width;
         const quadrant_height: u32 = num_rows * slot_height;
 
