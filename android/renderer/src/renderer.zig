@@ -111,20 +111,21 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Se
     uniforms_buffer.bindBase(0);
 
     // Initialize font system with default font size
-    // Start with a default font size of 20pt and let the font system calculate proper cell dimensions
+    // initDefault uses 10pt as the default size (see font_metrics.zig)
     var font_system = try FontSystem.initDefault(allocator, dpi);
     errdefer font_system.deinit();
 
-    log.info("Font system initialized with default 20pt font", .{});
+    const default_size = font_metrics.FontSize.default(dpi);
+    log.info("Font system initialized with {d:.1}pt font at {d} DPI", .{ default_size.points, dpi });
 
     // Get the actual cell size from the font system
     const actual_cell_size = font_system.getCellSize();
     const cell_width = @as(u32, @intFromFloat(actual_cell_size[0]));
     const cell_height = @as(u32, @intFromFloat(actual_cell_size[1]));
 
-    log.info("Font system cell size: {d}x{d} (from 20pt font at {d} DPI)", .{
-        cell_width, cell_height, dpi
-    });
+    const font_size_px = default_size.toPixels();
+    log.info("Font metrics: {d:.1}pt = {d:.1}px at {d} DPI", .{ default_size.points, font_size_px, dpi });
+    log.info("Cell dimensions: {d}x{d} pixels", .{ cell_width, cell_height });
 
     // Calculate viewport padding needed to prevent glyph clipping
     // Glyphs can extend past their cell boundaries due to font bearings
@@ -132,22 +133,38 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Se
     log.info("Viewport padding: right={d}px, bottom={d}px", .{ padding.right, padding.bottom });
 
     // Calculate grid dimensions based on screen size and font-derived cell size
+    const screen_w = if (width > 0) width else 800;
+    const screen_h = if (height > 0) height else 600;
+
+    log.info("Screen dimensions: {d}x{d} pixels", .{ screen_w, screen_h });
+    log.info("Calculating grid: screen_width({d}) / cell_width({d}) = {d} cols", .{
+        screen_w, cell_width, screen_w / cell_width
+    });
+    log.info("Calculating grid: screen_height({d}) / cell_height({d}) = {d} rows", .{
+        screen_h, cell_height, screen_h / cell_height
+    });
+
     const grid = font_metrics.GridCalculator.calculate(
-        if (width > 0) width else 800,  // Default width if not set
-        if (height > 0) height else 600, // Default height if not set
+        screen_w,
+        screen_h,
         cell_width,
         cell_height,
-        80,  // min_cols (VT100 standard)
-        24   // min_rows (VT100 standard)
+        24,  // min_cols - reduced for mobile screens
+        16   // min_rows - reduced for mobile screens
     );
     const initial_grid_cols = grid.cols;
     const initial_grid_rows = grid.rows;
 
-    log.info("Calculated terminal grid: {d}x{d} (cell size: {d}x{d})", .{
+    log.info("Final terminal grid: {d} cols × {d} rows", .{
         initial_grid_cols,
         initial_grid_rows,
-        cell_width,
-        cell_height,
+    });
+
+    // Verify the calculation
+    const actual_width_used = initial_grid_cols * cell_width;
+    const actual_height_used = initial_grid_rows * cell_height;
+    log.info("Grid uses {d}x{d} pixels of {d}x{d} available", .{
+        actual_width_used, actual_height_used, screen_w, screen_h
     });
 
     // Create cell backgrounds SSBO
@@ -415,8 +432,8 @@ pub fn resize(self: *Self, width: u32, height: u32) !void {
         height,
         cell_width,
         cell_height,
-        80,  // min_cols (VT100 standard)
-        24   // min_rows (VT100 standard)
+        24,  // min_cols - reduced for mobile screens
+        16   // min_rows - reduced for mobile screens
     );
     const new_cols = grid.cols;
     const new_rows = grid.rows;
@@ -426,6 +443,8 @@ pub fn resize(self: *Self, width: u32, height: u32) !void {
         log.info("Resizing terminal from {d}x{d} to {d}x{d}", .{
             self.grid_cols, self.grid_rows, new_cols, new_rows
         });
+
+        log.info("Terminal will wrap at column {d} (visible width)", .{new_cols});
 
         try self.terminal_manager.resize(new_cols, new_rows);
         self.grid_cols = new_cols;

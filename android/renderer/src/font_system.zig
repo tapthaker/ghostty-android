@@ -194,6 +194,17 @@ pub const FontSystem = struct {
         const cell_height = metrics.cellHeight();
         const baseline = @as(i32, @intCast(metrics.baseline()));
 
+        log.info("Extracted font metrics:", .{});
+        log.info("  - Ascent: {d:.1}, Descent: {d:.1}, Line gap: {d:.1}", .{
+            metrics.ascent, metrics.descent, metrics.line_gap
+        });
+        log.info("  - Average width: {d:.1}, Max width: {d:.1}", .{
+            metrics.average_width, metrics.max_width
+        });
+        log.info("  - Calculated cell: {d}x{d}, baseline: {d}", .{
+            cell_width, cell_height, baseline
+        });
+
         // Calculate padding based on font metrics to prevent glyph bleeding
         // Use the maximum of underline thickness or 1/16 of cell height (whichever is larger)
         // This ensures padding scales appropriately with font size

@@ -58,8 +58,11 @@ pub const FontSize = struct {
 
     /// Get default font size for terminal
     pub fn default(dpi: u16) FontSize {
+        // For Android high DPI displays, use a smaller base font size
+        // This accounts for the inflated DPI values on mobile devices
+        // 6pt at 450 DPI ≈ 37.5px, giving us ~13px wide cells
         return .{
-            .points = 10.0, // 10pt default size for terminal
+            .points = 6.0, // 6pt default size for mobile terminal
             .dpi = dpi,
         };
     }
