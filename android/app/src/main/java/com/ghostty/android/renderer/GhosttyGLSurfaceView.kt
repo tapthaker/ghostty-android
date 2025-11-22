@@ -34,7 +34,7 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         // Font size constraints
         private const val MIN_FONT_SIZE = 8f
         private const val MAX_FONT_SIZE = 96f
-        private const val DEFAULT_FONT_SIZE = 48f
+        private const val DEFAULT_FONT_SIZE = 20f  // More reasonable default
     }
 
     private val renderer: GhosttyRenderer
@@ -74,17 +74,48 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
         // Initialize pinch-to-zoom gesture detector
         scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            private var baseFontSize = currentFontSize  // Store the font size at the start of gesture
+            private var accumulatedScale = 1f  // Track accumulated scale during the gesture
+            private var lastUpdateTime = 0L
+            private val UPDATE_THROTTLE_MS = 16L  // Throttle updates to max ~60 FPS for smooth scaling
+
+            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                Log.d(TAG, "Pinch zoom started - current font size: $currentFontSize")
+                baseFontSize = currentFontSize  // Remember font size at gesture start
+                accumulatedScale = 1f  // Reset accumulated scale
+                lastUpdateTime = 0L
+                return true
+            }
+
             override fun onScale(detector: ScaleGestureDetector): Boolean {
-                // Calculate new font size based on scale factor
+                // Throttle updates to avoid overwhelming the renderer
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastUpdateTime < UPDATE_THROTTLE_MS) {
+                    return true
+                }
+
+                // Get the current scale factor from the detector
+                // This is a RATIO: 1.0 = no change, >1.0 = zoom in, <1.0 = zoom out
                 val scaleFactor = detector.scaleFactor
-                val newFontSize = currentFontSize * scaleFactor
+
+                // Accumulate the scale factor
+                // This gives us the total scale from the beginning of the gesture
+                accumulatedScale *= scaleFactor
+
+                // Calculate new font size based on the base size and accumulated scale
+                // This ensures smooth, predictable scaling
+                val newFontSize = baseFontSize * accumulatedScale
 
                 // Clamp to valid range
                 val clampedSize = max(MIN_FONT_SIZE, min(MAX_FONT_SIZE, newFontSize))
 
-                if (clampedSize != currentFontSize) {
+                // Only update if change is significant enough (avoid tiny updates)
+                if (kotlin.math.abs(clampedSize - currentFontSize) > 0.1f) {
+                    Log.i(TAG, "Font size: %.1f -> %.1f (scale factor: %.3f, accumulated: %.3f)".format(
+                        currentFontSize, clampedSize, scaleFactor, accumulatedScale
+                    ))
                     currentFontSize = clampedSize
-                    Log.i(TAG, "Font size changed to: $currentFontSize")
+                    lastUpdateTime = currentTime
 
                     // Update font size on GL thread
                     queueEvent {
@@ -94,6 +125,13 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 }
 
                 return true
+            }
+
+            override fun onScaleEnd(detector: ScaleGestureDetector) {
+                Log.d(TAG, "Pinch zoom ended - final font size: $currentFontSize")
+                // Reset for next gesture
+                baseFontSize = currentFontSize
+                accumulatedScale = 1f
             }
         })
 
