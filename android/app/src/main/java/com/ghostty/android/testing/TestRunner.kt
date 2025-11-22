@@ -42,6 +42,16 @@ class TestRunner(
     private val _isRunning = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
 
+    // Test navigation state
+    private var allTests = listOf<TestCase>()
+    private var currentTestIndex = 0
+
+    private val _currentTestIndex = MutableStateFlow(0)
+    val currentTestIndexFlow: StateFlow<Int> = _currentTestIndex.asStateFlow()
+
+    private val _totalTests = MutableStateFlow(0)
+    val totalTests: StateFlow<Int> = _totalTests.asStateFlow()
+
     /**
      * Run a single test case.
      *
@@ -57,18 +67,11 @@ class TestRunner(
         return try {
             // Clear the terminal first
             renderer.processInput("\u001B[2J\u001B[H")
-            delay(100)  // Give terminal time to clear
 
-            // Inject the ANSI sequence
+            // Inject the ANSI sequence immediately
             renderer.processInput(testCase.ansiSequence)
 
-            // Wait for rendering to complete
-            delay(500)
-
             Log.i(TAG, "TEST_READY:${testCase.id}")
-
-            // Wait a bit more for screenshot capture
-            delay(1000)
 
             val endTime = System.currentTimeMillis()
             val duration = endTime - startTime
@@ -99,68 +102,142 @@ class TestRunner(
         }
     }
 
-    /**
-     * Run multiple test cases sequentially.
-     *
-     * @param testCases List of tests to execute
-     */
-    fun runTests(testCases: List<TestCase>) {
-        if (_isRunning.value) {
-            Log.w(TAG, "Tests already running")
-            return
-        }
-
-        scope.launch {
-            _isRunning.value = true
-            _testResults.value = emptyList()
-
-            val results = mutableListOf<TestResult>()
-
-            for (testCase in testCases) {
-                val result = runTest(testCase)
-                results.add(result)
-                _testResults.value = results.toList()
-
-                // Delay between tests
-                delay(1000)
-            }
-
-            _isRunning.value = false
-            Log.i(TAG, "All tests completed: ${results.size} tests run")
-        }
-    }
-
-    /**
-     * Run all tests in a suite.
-     */
-    fun runAllTests() {
-        runTests(TestSuite.getAllTests())
-    }
-
-    /**
-     * Run tests with a specific tag.
-     */
-    fun runTestsByTag(tag: String) {
-        runTests(TestSuite.getTestsByTag(tag))
-    }
-
-    /**
-     * Run a specific test by ID.
-     */
-    fun runTestById(testId: String) {
-        val testCase = TestSuite.getTestById(testId)
-        if (testCase != null) {
-            runTests(listOf(testCase))
-        } else {
-            Log.w(TAG, "Test not found: $testId")
-        }
-    }
 
     /**
      * Clear test results.
      */
     fun clearResults() {
         _testResults.value = emptyList()
+    }
+
+    /**
+     * Initialize tests for navigation.
+     */
+    fun initializeTests(testCases: List<TestCase>) {
+        if (_isRunning.value) {
+            Log.w(TAG, "Tests already running")
+            return
+        }
+
+        allTests = testCases
+        currentTestIndex = 0
+        _totalTests.value = testCases.size
+        _currentTestIndex.value = 0
+        _testResults.value = emptyList()
+
+        // Run the first test
+        if (testCases.isNotEmpty()) {
+            runCurrentTest()
+        }
+    }
+
+    /**
+     * Initialize tests, optionally starting at a specific test ID.
+     */
+    fun initializeTestById(testId: String) {
+        // Always load all tests for navigation
+        val allTests = TestSuite.getAllTests()
+
+        if (testId == "all" || testId.isEmpty()) {
+            // Start from the beginning
+            initializeTests(allTests)
+        } else {
+            // Find the starting index for the specified test
+            val startIndex = allTests.indexOfFirst { it.id == testId }
+            if (startIndex >= 0) {
+                // Initialize with all tests but start at the specified one
+                this.allTests = allTests
+                currentTestIndex = startIndex
+                _totalTests.value = allTests.size
+                _currentTestIndex.value = startIndex
+                _testResults.value = emptyList()
+
+                // Run the specified test
+                runCurrentTest()
+
+                Log.i(TAG, "Initialized with all tests, starting at: $testId (index $startIndex)")
+            } else {
+                Log.w(TAG, "Test not found: $testId, starting from beginning")
+                initializeTests(allTests)
+            }
+        }
+    }
+
+    /**
+     * Move to the next test.
+     */
+    fun nextTest() {
+        if (_isRunning.value) {
+            Log.w(TAG, "Cannot move to next test: test is currently running")
+            return
+        }
+
+        if (currentTestIndex < allTests.size - 1) {
+            currentTestIndex++
+            _currentTestIndex.value = currentTestIndex
+            runCurrentTest()
+        } else {
+            Log.i(TAG, "Already at last test")
+        }
+    }
+
+    /**
+     * Move to the previous test.
+     */
+    fun previousTest() {
+        if (_isRunning.value) {
+            Log.w(TAG, "Cannot move to previous test: test is currently running")
+            return
+        }
+
+        if (currentTestIndex > 0) {
+            currentTestIndex--
+            _currentTestIndex.value = currentTestIndex
+            runCurrentTest()
+        } else {
+            Log.i(TAG, "Already at first test")
+        }
+    }
+
+    /**
+     * Check if we can go to the next test.
+     */
+    fun hasNextTest(): Boolean = currentTestIndex < allTests.size - 1
+
+    /**
+     * Check if we can go to the previous test.
+     */
+    fun hasPreviousTest(): Boolean = currentTestIndex > 0
+
+    /**
+     * Run the current test.
+     */
+    private fun runCurrentTest() {
+        if (currentTestIndex >= allTests.size) {
+            Log.w(TAG, "Test index out of bounds: $currentTestIndex")
+            return
+        }
+
+        val testCase = allTests[currentTestIndex]
+
+        scope.launch {
+            _isRunning.value = true
+
+            val result = runTest(testCase)
+
+            // Update results list (replace if existing, append if new)
+            val currentResults = _testResults.value.toMutableList()
+            val existingIndex = currentResults.indexOfFirst { it.testCase.id == testCase.id }
+            if (existingIndex >= 0) {
+                currentResults[existingIndex] = result
+            } else {
+                currentResults.add(result)
+            }
+            _testResults.value = currentResults
+
+            _isRunning.value = false
+            Log.i(TAG, "Test completed: ${testCase.id} (${currentTestIndex + 1}/${allTests.size})")
+        }
     }
 
     companion object {

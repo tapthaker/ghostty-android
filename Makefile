@@ -1,7 +1,7 @@
 # Ghostty Android - Makefile
 # Build system for cross-compiling libghostty-vt to Android targets
 
-.PHONY: help setup build-native build-android android android-studio clean clean-all check-env check-nix-shell test test-list test-feedback test-feedback-list test-feedback-id test-feedback-from
+.PHONY: help setup build-native build-android android android-studio clean clean-all check-env check-nix-shell test test-list test-feedback test-feedback-list test-feedback-id
 
 # Configuration
 GHOSTTY_REPO = https://github.com/ghostty-org/ghostty.git
@@ -67,10 +67,9 @@ help:
 	@echo -e "  $(COLOR_BOLD)make logs$(COLOR_RESET)           - Show filtered adb logs for Ghostty app"
 	@echo ""
 	@echo -e "$(COLOR_GREEN)Testing:$(COLOR_RESET)"
-	@echo -e "  $(COLOR_BOLD)make test-feedback$(COLOR_RESET)      - Run all feedback loop tests (interactive)"
+	@echo -e "  $(COLOR_BOLD)make test-feedback$(COLOR_RESET)      - Run all tests with next/prev navigation"
 	@echo -e "  $(COLOR_BOLD)make test-feedback-list$(COLOR_RESET) - List all available test IDs"
-	@echo -e "  $(COLOR_BOLD)make test-feedback-id$(COLOR_RESET)   - Run specific test (e.g., TEST_ID=text_attributes)"
-	@echo -e "  $(COLOR_BOLD)make test-feedback-from$(COLOR_RESET) - Run tests starting from ID (e.g., FROM=256_colors)"
+	@echo -e "  $(COLOR_BOLD)make test-feedback-id$(COLOR_RESET)   - Start at specific test (e.g., TEST_ID=text_attributes)"
 	@echo ""
 	@echo -e "$(COLOR_GREEN)Maintenance:$(COLOR_RESET)"
 	@echo -e "  $(COLOR_BOLD)make clean$(COLOR_RESET)          - Clean build artifacts"
@@ -182,10 +181,10 @@ logs: check-nix-shell
 		(echo -e "$(COLOR_YELLOW)App not running, showing all logs with package filter...$(COLOR_RESET)" && \
 		adb logcat | grep --line-buffered "com.ghostty.android")
 
-## test-feedback: Run all feedback loop tests (interactive)
+## test-feedback: Run tests with manual next/prev navigation
 test-feedback: check-nix-shell
-	@echo -e "$(COLOR_BLUE)Running feedback loop tests (interactive)...$(COLOR_RESET)"
-	@echo -e "$(COLOR_YELLOW)Note: This will launch tests one at a time for manual verification$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Running tests with manual navigation...$(COLOR_RESET)"
+	@echo -e "$(COLOR_YELLOW)Use the Next/Previous buttons in the app to navigate between tests$(COLOR_RESET)"
 	@python3 test_feedback_loop.py
 
 ## test-feedback-list: List all available test IDs
@@ -226,9 +225,8 @@ test-feedback-list:
 	@echo ""
 	@echo -e "$(COLOR_YELLOW)Usage:$(COLOR_RESET)"
 	@echo "  make test-feedback-id TEST_ID=text_attributes"
-	@echo "  make test-feedback-from FROM=256_colors"
 
-## test-feedback-id: Run a specific test by ID
+## test-feedback-id: Start at a specific test (but loads all tests for navigation)
 test-feedback-id: check-nix-shell
 	@if [ -z "$(TEST_ID)" ]; then \
 		echo -e "$(COLOR_YELLOW)Error: TEST_ID not specified$(COLOR_RESET)"; \
@@ -237,20 +235,10 @@ test-feedback-id: check-nix-shell
 		echo "Run 'make test-feedback-list' to see all available test IDs"; \
 		exit 1; \
 	fi
-	@echo -e "$(COLOR_BLUE)Running test: $(TEST_ID)$(COLOR_RESET)"
+	@echo -e "$(COLOR_BLUE)Starting at test: $(TEST_ID)$(COLOR_RESET)"
+	@echo -e "$(COLOR_YELLOW)All tests loaded for navigation with Next/Previous buttons$(COLOR_RESET)"
 	@python3 test_feedback_loop.py --test-id $(TEST_ID)
 
-## test-feedback-from: Run tests starting from a specific test ID
-test-feedback-from: check-nix-shell
-	@if [ -z "$(FROM)" ]; then \
-		echo -e "$(COLOR_YELLOW)Error: FROM not specified$(COLOR_RESET)"; \
-		echo "Usage: make test-feedback-from FROM=256_colors"; \
-		echo ""; \
-		echo "Run 'make test-feedback-list' to see all available test IDs"; \
-		exit 1; \
-	fi
-	@echo -e "$(COLOR_BLUE)Running tests starting from: $(FROM)$(COLOR_RESET)"
-	@python3 test_feedback_loop.py --start-from $(FROM)
 
 ## test: Alias for test-feedback (for convenience)
 test: test-feedback

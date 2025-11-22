@@ -155,12 +155,14 @@ fun TestModeScreen(
     val isRunning by testRunner?.isRunning?.collectAsState() ?: remember { mutableStateOf(false) }
     val testResults by testRunner?.testResults?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     val currentTest by testRunner?.currentTest?.collectAsState() ?: remember { mutableStateOf(null) }
+    val currentTestIndex by testRunner?.currentTestIndexFlow?.collectAsState() ?: remember { mutableStateOf(0) }
+    val totalTests by testRunner?.totalTests?.collectAsState() ?: remember { mutableStateOf(0) }
 
-    // Auto-start tests when both testRunner and testId are available
+    // Initialize tests when both testRunner and testId are available
     if (testRunner != null && testId != null) {
         LaunchedEffect(testId, testRunner) {
-            android.util.Log.i("TestModeScreen", "LaunchedEffect: starting test testId=$testId")
-            testRunner.runTestById(testId)
+            android.util.Log.i("TestModeScreen", "LaunchedEffect: initializing tests testId=$testId")
+            testRunner.initializeTestById(testId)
             onTestsStarted()
         }
     } else {
@@ -185,23 +187,42 @@ fun TestModeScreen(
                     .navigationBarsPadding(),
                 tonalElevation = 3.dp
             ) {
-                Row(
+                Column(
                     modifier = Modifier.padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Button(
-                        onClick = { testRunner?.runAllTests() },
-                        enabled = !isRunning && testRunner != null,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Run All Tests")
+                    // Test progress indicator
+                    if (totalTests > 0) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "Test ${currentTestIndex + 1} of $totalTests",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                        }
                     }
-                    Button(
-                        onClick = { testRunner?.runTestsByTag("color") },
-                        enabled = !isRunning && testRunner != null,
-                        modifier = Modifier.weight(1f)
+
+                    // Navigation buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("Run Color Tests")
+                        Button(
+                            onClick = { testRunner?.previousTest() },
+                            enabled = !isRunning && testRunner?.hasPreviousTest() == true,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Previous")
+                        }
+                        Button(
+                            onClick = { testRunner?.nextTest() },
+                            enabled = !isRunning && testRunner?.hasNextTest() == true,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Next")
+                        }
                     }
                 }
             }
