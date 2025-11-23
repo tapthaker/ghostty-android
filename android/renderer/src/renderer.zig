@@ -623,7 +623,29 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
             self.grid_cols, self.grid_rows, grid.cols, grid.rows
         });
 
+        // Before resize, log current terminal state
+        const old_size = self.terminal_manager.getSize();
+        log.info("Terminal size before resize: {d}x{d}", .{ old_size.cols, old_size.rows });
+
+        // Sample some terminal content before resize
+        const terminal = self.terminal_manager.getTerminal();
+        const screen = terminal.screen;
+        log.info("Before resize: screen has {} total rows, cursor at row {}", .{
+            screen.pages.total_rows, screen.cursor.y
+        });
+
         try self.terminal_manager.resize(grid.cols, grid.rows);
+
+        // After resize, verify the new size and content
+        const new_size = self.terminal_manager.getSize();
+        log.info("Terminal size after resize: {d}x{d}", .{ new_size.cols, new_size.rows });
+
+        // Check if content changed after resize
+        const screen_after = terminal.screen;
+        log.info("After resize: screen has {} total rows, cursor at row {}", .{
+            screen_after.pages.total_rows, screen_after.cursor.y
+        });
+
         self.grid_cols = grid.cols;
         self.grid_rows = grid.rows;
 
@@ -634,29 +656,20 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
     // Sync all uniform changes
     try self.uniforms_buffer.sync(&[_]shaders.Uniforms{self.uniforms});
 
-    // 9. Regenerate test glyphs with new font system
-    const test_string = "Hello World!";
-    var test_glyphs: [test_string.len]shaders.CellText = undefined;
+    // 9. Re-sync terminal content after resize to trigger proper reflow
+    // This is crucial - the terminal has been resized and we need to
+    // extract the reflowed content from ghostty-vt
+    // Don't generate test glyphs here - syncFromTerminal will populate
+    // the glyphs buffer with actual terminal content
+    log.info("Calling syncFromTerminal to extract reflowed content after resize", .{});
+    try self.syncFromTerminal();
 
-    for (test_string, 0..) |char, i| {
-        test_glyphs[i] = (&self.font_system).makeCellText(
-            char,
-            @intCast(i), // col
-            0, // row
-            .{ 255, 255, 255, 255 }, // white text
-            .{}, // default attributes
-        );
-    }
-
-    self.num_test_glyphs = test_string.len;
-    try self.glyphs_buffer.sync(&test_glyphs);
-
-    log.info("Font size update completed successfully", .{});
+    log.info("Font size update completed successfully - font_size={}, grid={}x{}", .{ self.font_system.font_size, self.grid_cols, self.grid_rows });
 }
 
 /// Update renderer buffers from terminal state
 pub fn syncFromTerminal(self: *Self) !void {
-    log.info("Syncing renderer from terminal state - grid_cols={} grid_rows={}", .{ self.grid_cols, self.grid_rows });
+    log.info("syncFromTerminal: Starting sync - grid_cols={} grid_rows={}", .{ self.grid_cols, self.grid_rows });
 
     // Extract cell data from terminal
     const cells = try screen_extractor.extractCells(
@@ -665,7 +678,7 @@ pub fn syncFromTerminal(self: *Self) !void {
     );
     defer screen_extractor.freeCells(self.allocator, cells);
 
-    log.debug("Extracted {} cells from terminal", .{cells.len});
+    log.info("syncFromTerminal: Extracted {} cells from terminal (expected {})", .{ cells.len, self.grid_cols * self.grid_rows });
 
     // Allocate temp buffers for GPU data
     const num_cells: usize = @intCast(self.grid_cols * self.grid_rows);
@@ -758,6 +771,21 @@ pub fn syncFromTerminal(self: *Self) !void {
         skipped_count,
         non_ascii_count,
     });
+
+    // Log sample of first row content for debugging
+    if (cells.len > 0) {
+        var sample_text: [80]u8 = undefined;
+        var idx: usize = 0;
+        for (cells[0..@min(self.grid_cols, cells.len)]) |cell| {
+            if (idx < 79 and cell.codepoint >= 32 and cell.codepoint < 127) {
+                sample_text[idx] = @truncate(cell.codepoint);
+                idx += 1;
+            }
+        }
+        if (idx > 0) {
+            log.info("First row sample: {s}", .{sample_text[0..idx]});
+        }
+    }
 
     // Upload to GPU
     try self.cells_bg_buffer.sync(cell_bg_colors);

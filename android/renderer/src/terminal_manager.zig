@@ -26,7 +26,15 @@ pub fn init(allocator: Allocator, cols: u16, rows: u16) !TerminalManager {
         .rows = @intCast(rows),
         .default_modes = .{
             .linefeed = true, // LNM mode: make \n act as \r\n (newline with carriage return)
+            .wraparound = true, // Enable text reflow when terminal is resized
         },
+    });
+
+    // Verify modes were set correctly
+    const wraparound_enabled = terminal.modes.get(.wraparound);
+    const linefeed_enabled = terminal.modes.get(.linefeed);
+    log.info("Terminal initialized with modes: wraparound={}, linefeed={}", .{
+        wraparound_enabled, linefeed_enabled
     });
 
     return .{
@@ -52,12 +60,37 @@ pub fn processInput(self: *TerminalManager, data: []const u8) !void {
 
 /// Resize the terminal
 pub fn resize(self: *TerminalManager, cols: u16, rows: u16) !void {
-    log.info("Resizing terminal: {}x{}", .{ cols, rows });
+    log.info("Resizing terminal: {}x{} -> {}x{}", .{
+        self.terminal.cols, self.terminal.rows, cols, rows
+    });
+
+    // Log current mode states
+    const wraparound_enabled = self.terminal.modes.get(.wraparound);
+    log.info("Terminal modes: wraparound={}", .{wraparound_enabled});
+
+    // Get some terminal content before resize for debugging
+    const screen = self.terminal.screen;
+    const cursor_before = screen.cursor;
+    log.info("Before resize: cursor at ({}, {}), pending_wrap={}", .{
+        cursor_before.x, cursor_before.y, cursor_before.pending_wrap
+    });
+
+    // Perform the resize
     try self.terminal.resize(
         self.allocator,
         @intCast(cols),
         @intCast(rows),
     );
+
+    // Check state after resize
+    const cursor_after = self.terminal.screen.cursor;
+    log.info("After resize: cursor at ({}, {}), pending_wrap={}", .{
+        cursor_after.x, cursor_after.y, cursor_after.pending_wrap
+    });
+
+    log.info("Terminal resize complete: now {}x{}", .{
+        self.terminal.cols, self.terminal.rows
+    });
 }
 
 /// Get terminal dimensions
