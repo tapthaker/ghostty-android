@@ -69,7 +69,7 @@ pub fn resize(self: *TerminalManager, cols: u16, rows: u16) !void {
     log.info("Terminal modes: wraparound={}", .{wraparound_enabled});
 
     // Get some terminal content before resize for debugging
-    const screen = self.terminal.screen;
+    const screen = self.terminal.screens.get(.primary).?;
     const cursor_before = screen.cursor;
     log.info("Before resize: cursor at ({}, {}), pending_wrap={}", .{
         cursor_before.x, cursor_before.y, cursor_before.pending_wrap
@@ -83,7 +83,7 @@ pub fn resize(self: *TerminalManager, cols: u16, rows: u16) !void {
     );
 
     // Check state after resize
-    const cursor_after = self.terminal.screen.cursor;
+    const cursor_after = self.terminal.screens.get(.primary).?.cursor;
     log.info("After resize: cursor at ({}, {}), pending_wrap={}", .{
         cursor_after.x, cursor_after.y, cursor_after.pending_wrap
     });

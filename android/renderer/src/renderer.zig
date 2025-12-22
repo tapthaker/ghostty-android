@@ -9,7 +9,7 @@ const Buffer = @import("buffer.zig").Buffer;
 const Texture = @import("texture.zig");
 const shaders = @import("shaders.zig");
 const shader_module = @import("shader.zig");
-const FontSystem = @import("font_system.zig").FontSystem;
+const DynamicFontSystem = @import("dynamic_font_system.zig").DynamicFontSystem;
 const font_metrics = @import("font_metrics.zig");
 const TerminalManager = @import("terminal_manager.zig");
 const screen_extractor = @import("screen_extractor.zig");
@@ -21,8 +21,8 @@ const Self = @This();
 /// Allocator for renderer resources
 allocator: std.mem.Allocator,
 
-/// Font system for text rendering
-font_system: FontSystem,
+/// Dynamic font system with full UTF-8 support
+font_system: DynamicFontSystem,
 
 /// Terminal manager for VT processing
 terminal_manager: TerminalManager,
@@ -110,9 +110,9 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Se
     // Note: We use binding 0 for UBO since binding 1 is used for SSBO
     uniforms_buffer.bindBase(0);
 
-    // Initialize font system with default font size
+    // Initialize dynamic font system with full UTF-8 support
     // initDefault uses 10pt as the default size (see font_metrics.zig)
-    var font_system = try FontSystem.initDefault(allocator, dpi);
+    var font_system = try DynamicFontSystem.initDefault(allocator, dpi);
     errdefer font_system.deinit();
 
     const default_size = font_metrics.FontSize.default(dpi);
@@ -196,40 +196,44 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Se
 
     log.info("Terminal manager initialized ({d}x{d})", .{ initial_grid_cols, initial_grid_rows });
 
-    // Get dynamic atlas dimensions based on font size
+    // Get atlas dimensions from dynamic font system
     const font_atlas_dims = font_system.getAtlasDimensions();
     const atlas_width: u32 = font_atlas_dims[0];
     const atlas_height: u32 = font_atlas_dims[1];
 
     log.info("Atlas dimensions: {d}x{d}", .{ atlas_width, atlas_height });
 
-    // Populate grayscale atlas with actual font glyphs
-    const grayscale_data = try font_system.populateAtlas(atlas_width, atlas_height);
-    defer allocator.free(grayscale_data);
+    // Get the first grayscale atlas texture ID from the dynamic font system
+    // The DynamicFontSystem manages its own atlases internally
+    const grayscale_texture_id = font_system.getGrayscaleAtlas(0) orelse {
+        log.err("No grayscale atlas available from DynamicFontSystem", .{});
+        return error.NoGrayscaleAtlas;
+    };
 
-    log.info("Font atlas populated with glyphs", .{});
-
-    const atlas_grayscale = try Texture.init(.{
+    // Create a Texture wrapper around the existing OpenGL texture
+    const atlas_grayscale = Texture{
+        .texture = gl.Texture{ .id = grayscale_texture_id },
+        .width = atlas_width,
+        .height = atlas_height,
         .format = .red,
-        .internal_format = .r8,
-        .min_filter = .nearest,
-        .mag_filter = .nearest,
-    }, atlas_width, atlas_height, grayscale_data);
-    errdefer atlas_grayscale.deinit();
+    };
+    errdefer {} // Don't deinit - DynamicFontSystem owns this texture
 
-    // Color atlas (RGBA8 format for color emoji)
-    // Allocate with zero-filled data to ensure proper storage allocation on Mali
-    const color_data = try allocator.alloc(u8, atlas_width * atlas_height * 4); // RGBA = 4 bytes per pixel
-    defer allocator.free(color_data);
-    @memset(color_data, 0);
+    // Get the first RGBA atlas texture ID from the dynamic font system
+    // This is used for color emoji
+    const rgba_texture_id = font_system.getRgbaAtlas(0) orelse {
+        log.err("No RGBA atlas available from DynamicFontSystem", .{});
+        return error.NoRgbaAtlas;
+    };
 
-    const atlas_color = try Texture.init(.{
+    // Create a Texture wrapper around the existing OpenGL texture
+    const atlas_color = Texture{
+        .texture = gl.Texture{ .id = rgba_texture_id },
+        .width = atlas_width,
+        .height = atlas_height,
         .format = .rgba,
-        .internal_format = .rgba8,
-        .min_filter = .nearest,
-        .mag_filter = .nearest,
-    }, atlas_width, atlas_height, color_data);
-    errdefer atlas_color.deinit();
+    };
+    errdefer {} // Don't deinit - DynamicFontSystem owns this texture
 
     // Create atlas dimensions UBO
     var atlas_dims_buffer = try Buffer(shaders.AtlasDimensions).init(.{
@@ -546,7 +550,12 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
     // 2. Create new font system with new size
     // Convert pixels to points using the stored DPI
     const font_size_pts = (@as(f32, @floatFromInt(new_font_size)) * 72.0) / @as(f32, @floatFromInt(self.dpi));
-    self.font_system = try FontSystem.init(self.allocator, font_size_pts, self.dpi);
+    // Create a new font size from the point size
+    const font_size = font_metrics.FontSize{
+        .points = @floatCast(font_size_pts),
+        .dpi = self.dpi,
+    };
+    self.font_system = try DynamicFontSystem.init(self.allocator, font_size);
     errdefer self.font_system.deinit();
 
     log.info("New font system initialized with size {d:.1}pt ({d}px) at {d} DPI", .{ font_size_pts, new_font_size, self.dpi });
@@ -558,35 +567,35 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
 
     log.info("New atlas dimensions: {d}x{d}", .{ atlas_width, atlas_height });
 
-    // 4. Rebuild grayscale atlas
-    const grayscale_data = try self.font_system.populateAtlas(atlas_width, atlas_height);
-    defer self.allocator.free(grayscale_data);
+    // 4. Update atlas references
+    // The DynamicFontSystem manages its own atlases, so we just need to update our references
+    const grayscale_texture_id = self.font_system.getGrayscaleAtlas(0) orelse {
+        log.err("No grayscale atlas available from DynamicFontSystem", .{});
+        return error.NoGrayscaleAtlas;
+    };
 
-    // Update the existing texture with new data
-    self.atlas_grayscale.deinit();
-    self.atlas_grayscale = try Texture.init(.{
+    const rgba_texture_id = self.font_system.getRgbaAtlas(0) orelse {
+        log.err("No RGBA atlas available from DynamicFontSystem", .{});
+        return error.NoRgbaAtlas;
+    };
+
+    // Update the texture wrappers with the new IDs
+    // Don't deinit - DynamicFontSystem owns the textures
+    self.atlas_grayscale = Texture{
+        .texture = gl.Texture{ .id = grayscale_texture_id },
+        .width = atlas_width,
+        .height = atlas_height,
         .format = .red,
-        .internal_format = .r8,
-        .min_filter = .nearest,
-        .mag_filter = .nearest,
-    }, atlas_width, atlas_height, grayscale_data);
+    };
 
-    log.info("Grayscale atlas updated", .{});
-
-    // 5. Rebuild color atlas (empty for now)
-    const color_data = try self.allocator.alloc(u8, atlas_width * atlas_height * 4);
-    defer self.allocator.free(color_data);
-    @memset(color_data, 0);
-
-    self.atlas_color.deinit();
-    self.atlas_color = try Texture.init(.{
+    self.atlas_color = Texture{
+        .texture = gl.Texture{ .id = rgba_texture_id },
+        .width = atlas_width,
+        .height = atlas_height,
         .format = .rgba,
-        .internal_format = .rgba8,
-        .min_filter = .nearest,
-        .mag_filter = .nearest,
-    }, atlas_width, atlas_height, color_data);
+    };
 
-    log.info("Color atlas updated", .{});
+    log.info("Atlas references updated", .{});
 
     // 6. Update atlas dimensions UBO
     const atlas_dims = shaders.AtlasDimensions{
@@ -629,7 +638,7 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
 
         // Sample some terminal content before resize
         const terminal = self.terminal_manager.getTerminal();
-        const screen = terminal.screen;
+        const screen = terminal.screens.get(.primary).?;
         log.info("Before resize: screen has {} total rows, cursor at row {}", .{
             screen.pages.total_rows, screen.cursor.y
         });
@@ -641,7 +650,7 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
         log.info("Terminal size after resize: {d}x{d}", .{ new_size.cols, new_size.rows });
 
         // Check if content changed after resize
-        const screen_after = terminal.screen;
+        const screen_after = terminal.screens.get(.primary).?;
         log.info("After resize: screen has {} total rows, cursor at row {}", .{
             screen_after.pages.total_rows, screen_after.cursor.y
         });
@@ -664,7 +673,7 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
     log.info("Calling syncFromTerminal to extract reflowed content after resize", .{});
     try self.syncFromTerminal();
 
-    log.info("Font size update completed successfully - font_size={}, grid={}x{}", .{ self.font_system.font_size, self.grid_cols, self.grid_rows });
+    log.info("Font size update completed successfully - font_size={d:.1}pt, grid={}x{}", .{ self.font_system.collection.font_size.points, self.grid_cols, self.grid_rows });
 }
 
 /// Update renderer buffers from terminal state
@@ -694,6 +703,7 @@ pub fn syncFromTerminal(self: *Self) !void {
     // Process each cell
     var skipped_count: usize = 0;
     var non_ascii_count: usize = 0;
+    var wide_char_count: usize = 0;
     for (cells) |cell| {
         const idx: usize = @as(usize, cell.row) * @as(usize, self.grid_cols) + @as(usize, cell.col);
 
@@ -704,6 +714,22 @@ pub fn syncFromTerminal(self: *Self) !void {
             cell.bg_color[2],
             cell.bg_color[3],
         );
+
+        // Skip wide character continuation cells
+        if (cell.is_wide_continuation) {
+            continue;
+        }
+
+        // Skip null characters (empty/uninitialized cells)
+        if (cell.codepoint == 0) {
+            skipped_count += 1;
+            continue;
+        }
+
+        // Track wide characters
+        if (cell.width == 2) {
+            wide_char_count += 1;
+        }
 
         // Only add renderable glyphs (skip spaces with default colors)
         if (cell.codepoint != ' ' or cell.fg_color[0] != 255 or cell.fg_color[1] != 255 or cell.fg_color[2] != 255) {
@@ -765,11 +791,12 @@ pub fn syncFromTerminal(self: *Self) !void {
         }
     }
 
-    log.info("Cell processing: {} total cells, {} glyphs added, {} spaces skipped, {} non-ASCII", .{
+    log.info("Cell processing: {} total cells, {} glyphs added, {} spaces skipped, {} non-ASCII, {} wide chars", .{
         cells.len,
         text_glyphs.items.len,
         skipped_count,
         non_ascii_count,
+        wide_char_count,
     });
 
     // Log sample of first row content for debugging

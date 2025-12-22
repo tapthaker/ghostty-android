@@ -9,13 +9,24 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ghostty_vt = @import("ghostty-vt");
+const codepoint_width = @import("codepoint_width.zig");
 
 const log = std.log.scoped(.screen_extractor);
 
 /// Extracted cell data ready for rendering
 pub const CellData = struct {
-    /// Unicode codepoint to render
+    /// Primary Unicode codepoint to render
     codepoint: u21,
+
+    /// Additional codepoints if this is a grapheme cluster
+    /// (e.g., base character + combining marks)
+    grapheme_cluster: ?[]const u21 = null,
+
+    /// Character width (0=zero-width, 1=single, 2=double)
+    width: u8 = 1,
+
+    /// Is this a continuation cell for a wide character?
+    is_wide_continuation: bool = false,
 
     /// Foreground color (RGBA)
     fg_color: [4]u8,
@@ -61,7 +72,7 @@ pub fn extractCells(
     var cells = try std.ArrayList(CellData).initCapacity(allocator, total_cells);
     errdefer cells.deinit(allocator);
 
-    const screen = &terminal.screen;
+    const screen = terminal.screens.get(.primary).?;
     const palette = &terminal.colors.palette.current;
 
     // Default colors
@@ -105,12 +116,32 @@ pub fn extractCells(
                 .b = 0,
             };
 
-            // Get the codepoint - handle spacer head cells
-            const codepoint: u21 = switch (cell.content_tag) {
+            // Handle spacer cells for wide characters
+            // Check if this is a spacer cell (continuation of wide char)
+            if (cell.wide == .spacer_tail or cell.wide == .spacer_head) {
+                // This is a spacer cell for a wide character
+                // Skip it but still account for the cell position
+                continue;
+            }
+
+            // Get the codepoint and check for grapheme clusters
+            const grapheme_codepoints: ?[]const u21 = null;
+
+            const primary_codepoint: u21 = switch (cell.content_tag) {
                 .codepoint => cell.content.codepoint,
-                .codepoint_grapheme => cell.content.codepoint,
+                .codepoint_grapheme => blk: {
+                    // This cell contains a grapheme cluster
+                    // TODO: Extract additional codepoints from grapheme storage
+                    // For now, we'll just use the base codepoint
+                    // In a full implementation, we'd access the grapheme storage
+                    // from the page to get all codepoints in the cluster
+                    break :blk cell.content.codepoint;
+                },
                 .bg_color_palette, .bg_color_rgb => ' ', // Color-only cells render as space
             };
+
+            // Get the character width
+            const char_width = codepoint_width.codepointWidth(primary_codepoint);
 
             // Extract text style attributes from VT style flags
             const underline_type: CellData.Underline = switch (style_val.flags.underline) {
@@ -123,7 +154,10 @@ pub fn extractCells(
             };
 
             try cells.append(allocator, .{
-                .codepoint = codepoint,
+                .codepoint = primary_codepoint,
+                .grapheme_cluster = grapheme_codepoints,
+                .width = char_width,
+                .is_wide_continuation = false,
                 .fg_color = .{ fg_rgb.r, fg_rgb.g, fg_rgb.b, 255 },
                 .bg_color = .{ bg_rgb.r, bg_rgb.g, bg_rgb.b, 255 },
                 .col = @intCast(col),
