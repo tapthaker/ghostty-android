@@ -304,13 +304,14 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Se
     const actual_width = if (width > 0) @as(f32, @floatFromInt(width)) else 800.0;
     const actual_height = if (height > 0) @as(f32, @floatFromInt(height)) else 600.0;
 
-    // Expand projection matrix to include padding area beyond viewport
-    // This allows glyphs to render past screen edges without clipping
-    const projection_width = actual_width + @as(f32, @floatFromInt(padding.right));
-    const projection_height = actual_height + @as(f32, @floatFromInt(padding.bottom));
+    // Projection matrix must match screen_size exactly for text/background alignment
+    // Previously included padding which caused text to scale differently from backgrounds
+    // (text was scaled by screen_size/projection_size, causing ~3.4px drift per row)
+    // Note: padding is still logged below for debugging but not used in projection
+    const projection_width = actual_width;
+    const projection_height = actual_height;
 
-    // Set OpenGL viewport to actual screen size (NOT expanded)
-    // The projection matrix handles the coordinate expansion for padding
+    // Set OpenGL viewport to actual screen size
     gl.viewport(
         0,
         0,
@@ -405,21 +406,17 @@ pub fn resize(self: *Self, width: u32, height: u32) !void {
         @floatFromInt(height),
     };
 
-    // Get viewport padding for glyph clipping prevention
-    const padding = self.font_system.getViewportPadding();
-
-    // Expand projection matrix to include padding area beyond viewport
-    // This allows glyphs to render past screen edges without clipping
-    const projection_width = @as(f32, @floatFromInt(width)) + @as(f32, @floatFromInt(padding.right));
-    const projection_height = @as(f32, @floatFromInt(height)) + @as(f32, @floatFromInt(padding.bottom));
+    // Projection matrix must match screen_size exactly for text/background alignment
+    // Previously included padding which caused text to scale differently from backgrounds
+    const projection_width = @as(f32, @floatFromInt(width));
+    const projection_height = @as(f32, @floatFromInt(height));
 
     self.uniforms.projection_matrix = shaders.createOrthoMatrix(
         projection_width,
         projection_height,
     );
 
-    // Set OpenGL viewport to actual screen size (NOT expanded)
-    // The projection matrix handles the coordinate expansion for padding
+    // Set OpenGL viewport to actual screen size
     gl.viewport(
         0,
         0,
