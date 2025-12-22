@@ -377,8 +377,8 @@ pub const DynamicFontSystem = struct {
         // Underline position: slightly below baseline
         const underline_pos = (baseline_f + 2.0) / cell_height_f;
 
-        // Underline thickness: 1 pixel relative to cell height
-        const thickness = 1.0 / cell_height_f;
+        // Underline thickness: 2 pixels relative to cell height for better visibility
+        const thickness = 2.0 / cell_height_f;
 
         // Strikethrough position: middle of x-height or 45% from top
         const strikethrough_pos = 0.45;

@@ -125,8 +125,14 @@ void main() {
 
     // Only sample texture if we're within the glyph bounds
     if (in_glyph) {
-        // Simple texture sampling - use interpolated coordinates from vertex shader
-        vec2 tex_coord = out_tex_coord;
+        // Map from cell coord to glyph-relative coord (0-1 within glyph)
+        // This allows proper texture sampling when using cell-sized quads
+        vec2 glyph_coord;
+        glyph_coord.x = (out_cell_coord.x - out_glyph_bounds.x) / (out_glyph_bounds.z - out_glyph_bounds.x);
+        glyph_coord.y = (out_cell_coord.y - out_glyph_bounds.y) / (out_glyph_bounds.w - out_glyph_bounds.y);
+
+        // Calculate texture coordinate from glyph position and size
+        vec2 tex_coord = vec2(out_glyph_pos) + vec2(out_glyph_size) * glyph_coord;
 
         switch (out_atlas) {
             case ATLAS_GRAYSCALE:

@@ -117,7 +117,7 @@ void main() {
     // the y offset. The X bearing is the distance from the left of the cell
     // to the left of the glyph, so it works as the x offset directly.
 
-    // Use actual glyph size instead of cell size for proper character proportions
+    // Get glyph size for bounds calculation
     vec2 glyph_size_f = vec2(glyph_size);
 
     // Calculate offset based on bearings (per the diagram above)
@@ -129,18 +129,23 @@ void main() {
     offset.x = float(bearings.x);
     offset.y = baseline - float(bearings.y);
 
-    // Position the glyph within the cell using offset and actual glyph size
-    vec2 glyph_top_left = cell_pos + offset;
-    vec2 quad_pos = glyph_top_left + glyph_size_f * corner;
+    // Use cell-sized quad to ensure decorations (underline, strikethrough) can render
+    // Decorations are positioned relative to cell coordinates (0-1), so we need
+    // the quad to cover the full cell, not just the glyph area.
+    vec2 quad_pos = cell_pos + cell_size * corner;
 
-    // Since the quad is now exactly the glyph size (not the cell size),
-    // the entire quad is valid glyph area. out_cell_coord spans 0-1 across the quad,
-    // so glyph_bounds should be (0,0,1,1) to indicate the whole quad is the glyph.
-    out_glyph_bounds = vec4(0.0, 0.0, 1.0, 1.0);
+    // Calculate glyph bounds within the cell (normalized 0-1)
+    // This tells the fragment shader where to sample the glyph texture
+    vec2 glyph_start = offset / cell_size;
+    vec2 glyph_end = (offset + glyph_size_f) / cell_size;
+    out_glyph_bounds = vec4(glyph_start.x, glyph_start.y, glyph_end.x, glyph_end.y);
 
-    // Texture coordinates map directly to glyph position in atlas
-    out_tex_coord = vec2(glyph_pos) + vec2(glyph_size) * corner;
+    // out_cell_coord is now correctly 0-1 across the cell
     out_cell_coord = corner;
+
+    // Note: out_tex_coord is no longer used for direct interpolation
+    // Fragment shader will calculate texture coords from cell_coord and glyph_bounds
+    out_tex_coord = vec2(0.0);
 
     gl_Position = projection_matrix * vec4(quad_pos.x, quad_pos.y, 0.0, 1.0);
 
