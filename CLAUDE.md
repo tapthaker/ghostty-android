@@ -4,9 +4,24 @@ Quick reference for Claude Code working with Ghostty Android.
 
 ## Critical Rules
 
-1. **ALWAYS run `nix-shell` first** - All commands require nix-shell environment
+1. **Use `command nix-shell --command "make ..."` to run commands** - This bypasses zsh-nix-shell plugin issues
 2. **Use `make` targets** - Don't call scripts directly (Makefile has automatic checks)
 3. **Check `make help`** - Shows all available targets and configuration
+
+## Running Commands (Important!)
+
+The system uses zsh-nix-shell plugin which can interfere with `nix-shell --command`. Always use:
+
+```bash
+# Correct way to run make commands
+command nix-shell --command "make android"
+command nix-shell --command "make test-feedback-id TEST_ID=text_attributes"
+
+# DO NOT use (will fail with "buildShellShim" error):
+nix-shell --command "make android"
+```
+
+The `command` prefix bypasses the zsh function wrapper and uses the actual nix-shell binary.
 
 ## Quick Commands
 
@@ -70,25 +85,36 @@ make clean-all   # Clean everything
 
 **Full workflow:**
 ```bash
-nix-shell
-make android                              # Build + install
-make test-feedback-id TEST_ID=text_attributes  # Test
+# Build, install, and launch the app
+command nix-shell --command "make android"
+
+# Run a specific visual test
+command nix-shell --command "make test-feedback-id TEST_ID=text_attributes"
 ```
 
 **Incremental rebuild:**
 ```bash
-nix-shell
-make build-native    # If Zig code changed
-make build-android   # If Kotlin code changed
-make install
+# If Zig code changed
+command nix-shell --command "make build-native"
+
+# If Kotlin code changed
+command nix-shell --command "make build-android"
+
+# Install to device
+command nix-shell --command "make install"
+```
+
+**Capture screenshot:**
+```bash
+adb exec-out screencap -p > /tmp/screenshot.png
 ```
 
 **DO ✓**
-- Work in nix-shell
+- Use `command nix-shell --command "make ..."` syntax
 - Use make targets
 - Call gradle from `android/` dir: `cd android && ./gradlew ...`
 
 **DON'T ✗**
-- Run make outside nix-shell
+- Use bare `nix-shell --command` (zsh plugin breaks it)
 - Call `./scripts/build-*.sh` directly
 - Run gradle from project root
