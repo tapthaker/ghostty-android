@@ -343,6 +343,7 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Se
             .use_linear_correction = false,
         },
         .font_decoration_metrics = font_system.getDecorationMetrics(), // Font-based decoration positions
+        .baseline = font_system.getBaseline(), // Baseline position for glyph positioning
     };
 
     log.info("Cell size from font: {d}x{d}", .{ uniforms.cell_size[0], uniforms.cell_size[1] });
@@ -610,6 +611,7 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
     const cell_size = self.font_system.getCellSize();
     self.uniforms.cell_size = cell_size;
     self.uniforms.font_decoration_metrics = self.font_system.getDecorationMetrics(); // Update decoration metrics
+    self.uniforms.baseline = self.font_system.getBaseline(); // Update baseline for glyph positioning
 
     log.info("Cell size updated to: {}x{}", .{ cell_size[0], cell_size[1] });
 

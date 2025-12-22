@@ -56,6 +56,10 @@ pub const Uniforms = extern struct {
     /// [3] = decoration_thickness (general thickness for decorations)
     font_decoration_metrics: [4]f32 align(16),
 
+    /// The baseline position in pixels from the top of the cell.
+    /// Used for positioning glyphs correctly based on their bearings.
+    baseline: f32 align(4),
+
     pub const Bools = packed struct(u32) {
         /// Whether the cursor is 2 cells wide.
         cursor_wide: bool,

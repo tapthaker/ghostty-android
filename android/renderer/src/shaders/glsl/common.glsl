@@ -29,6 +29,7 @@ layout(binding = 0, std140) uniform Globals {
     uniform uint bg_color_packed_4u8;
     uniform uint bools;
     uniform vec4 font_decoration_metrics;
+    uniform float baseline;
 };
 
 // Bools
