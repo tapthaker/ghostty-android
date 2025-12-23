@@ -197,13 +197,37 @@ pub const GlyphCache = struct {
         glyph_index: u32,
         size_pixels: u16,
     ) !RenderedGlyph {
-        // Set size (may already be set)
-        // Use 26.6 fixed point format (multiply by 64), assume 96 DPI
-        const char_size: i32 = @as(i32, @intCast(size_pixels)) * 64;
-        try face.face.setCharSize(char_size, char_size, 96, 96);
+        // Set size based on font type
+        // CBDT emoji fonts (like NotoColorEmoji) are NOT scalable - they have fixed bitmap sizes
+        // For these fonts, setCharSize() is IGNORED and we must use selectSize() instead
+        const is_scalable = face.face.isScalable();
+        const has_fixed_sizes = face.face.hasFixedSizes();
+
+        if (is_scalable) {
+            // Regular scalable fonts: use setCharSize for arbitrary sizes
+            // Use 26.6 fixed point format (multiply by 64), assume 96 DPI
+            var effective_size = size_pixels;
+
+            // Emoji fonts typically render larger than their em-square
+            // Scale down to fit within cell bounds
+            if (face.coverage_hint) |hint| {
+                if (hint == .emoji) {
+                    // Emoji fonts need ~60% of normal size to fit in cell
+                    effective_size = @as(u16, @intFromFloat(@as(f32, @floatFromInt(size_pixels)) * 0.6));
+                }
+            }
+
+            const char_size: i32 = @as(i32, @intCast(effective_size)) * 64;
+            try face.face.setCharSize(char_size, char_size, 96, 96);
+        } else if (has_fixed_sizes) {
+            // Bitmap fonts (CBDT emoji): the strike size is already selected during font loading
+            // We don't need to call selectSize again - just proceed with the current strike
+        } else {
+            log.warn("Font is neither scalable nor has fixed sizes for glyph {}", .{glyph_index});
+        }
 
         // Load and render the glyph
-        try face.face.loadGlyph(glyph_index, .{ .render = true });
+        try face.face.loadGlyph(glyph_index, .{ .render = true, .color = false });
 
         // Access glyph slot through handle
         const glyph = face.face.handle.*.glyph;
@@ -213,8 +237,11 @@ pub const GlyphCache = struct {
         // FreeType pixel modes: FT_PIXEL_MODE_GRAY = 2, FT_PIXEL_MODE_BGRA = 6
         const format: RenderedGlyph.Format = switch (bitmap.pixel_mode) {
             2 => .grayscale, // FT_PIXEL_MODE_GRAY
-            6 => .rgba,      // FT_PIXEL_MODE_BGRA
-            else => .grayscale, // Default to grayscale
+            6 => .rgba,      // FT_PIXEL_MODE_BGRA (color emoji)
+            else => blk: {
+                log.warn("Unknown pixel_mode {} for glyph {}, defaulting to grayscale", .{ bitmap.pixel_mode, glyph_index });
+                break :blk .grayscale;
+            },
         };
 
         // Calculate bitmap size
@@ -227,6 +254,19 @@ pub const GlyphCache = struct {
         const bitmap_data = try self.allocator.alloc(u8, bitmap_size);
         if (bitmap.buffer) |buffer| {
             @memcpy(bitmap_data, buffer[0..bitmap_size]);
+
+            // Convert BGRA to RGBA for color emoji
+            // FreeType returns BGRA byte order, but OpenGL expects RGBA
+            if (format == .rgba) {
+                var i: usize = 0;
+                while (i < bitmap_size) : (i += 4) {
+                    const b = bitmap_data[i];
+                    const r = bitmap_data[i + 2];
+                    bitmap_data[i] = r;     // R (was B)
+                    bitmap_data[i + 2] = b; // B (was R)
+                    // G and A stay in place
+                }
+            }
         } else {
             // Empty glyph (space, etc)
             @memset(bitmap_data, 0);
@@ -241,6 +281,35 @@ pub const GlyphCache = struct {
             .bearing_y = glyph.*.bitmap_top,
             .advance = @intCast(glyph.*.advance.x >> 6), // Convert from 26.6 fixed point
         };
+    }
+
+    /// Select the nearest available bitmap strike size for non-scalable fonts (e.g., CBDT emoji)
+    fn selectNearestStrike(face: freetype.Face, target_size: u16) !void {
+        const num_sizes = face.handle.*.num_fixed_sizes;
+        if (num_sizes == 0) {
+            log.warn("Font has no fixed sizes available", .{});
+            return error.FontError;
+        }
+
+        var best_idx: i32 = 0;
+        var best_diff: u32 = std.math.maxInt(u32);
+
+        var i: i32 = 0;
+        while (i < num_sizes) : (i += 1) {
+            const strike = face.handle.*.available_sizes[@intCast(i)];
+            // Use height as the comparison metric (more reliable than width for emoji)
+            const strike_size: u32 = @intCast(strike.height);
+            const target: u32 = @intCast(target_size);
+            const diff = if (strike_size > target) strike_size - target else target - strike_size;
+
+            if (diff < best_diff) {
+                best_diff = diff;
+                best_idx = i;
+            }
+        }
+
+        log.debug("Selected strike index {} (diff={}) for target size {}", .{ best_idx, best_diff, target_size });
+        try face.selectSize(best_idx);
     }
 
     /// Move a node to the front of the LRU list (key-based)

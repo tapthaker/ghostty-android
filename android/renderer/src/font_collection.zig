@@ -270,10 +270,17 @@ pub const FontCollection = struct {
             log.info("Loaded Noto CJK as fallback", .{});
         }
 
-        // Try to load emoji font
-        if (self.tryLoadSingleFont(AndroidFonts.noto_emoji, .emoji)) |family| {
+        // Load embedded emoji font (CBDT format, works reliably with FreeType)
+        if (self.loadEmbeddedEmojiFont()) |family| {
             try self.fallbacks.append(self.allocator, family);
-            log.info("Loaded Noto Emoji as fallback", .{});
+            log.info("Loaded embedded Noto Color Emoji (CBDT) as fallback", .{});
+        } else |err| {
+            log.warn("Failed to load embedded emoji font: {}", .{err});
+            // Fall back to system emoji font if embedded fails
+            if (self.tryLoadSingleFont(AndroidFonts.noto_emoji, .emoji)) |family| {
+                try self.fallbacks.append(self.allocator, family);
+                log.info("Loaded system Noto Emoji as fallback", .{});
+            }
         }
 
         // Try DroidSans as final fallback
@@ -285,6 +292,46 @@ pub const FontCollection = struct {
             try self.fallbacks.append(self.allocator, family);
             log.info("Loaded DroidSans as final fallback", .{});
         }
+    }
+
+    /// Load the embedded monochrome emoji font (OpenMoji Black)
+    fn loadEmbeddedEmojiFont(self: *FontCollection) !FontFamily {
+        var face = try self.library.initMemoryFace(embedded_fonts.openmoji_black, 0);
+        errdefer face.deinit();
+
+        // Verify the face handle is valid
+        if (@intFromPtr(face.handle) == 0) {
+            face.deinit();
+            return error.InvalidFontFace;
+        }
+
+        // Log font properties
+        const is_scalable = face.isScalable();
+        const has_fixed_sizes = face.hasFixedSizes();
+        log.info("EMBEDDED EMOJI FONT (OpenMoji Black): is_scalable={}, has_fixed_sizes={}", .{
+            is_scalable,
+            has_fixed_sizes,
+        });
+
+        // OpenMoji Black is a scalable outline font, set char size
+        const font_size_px = self.font_size.toPixels();
+        const size_pixels = @as(u32, @intFromFloat(@round(font_size_px)));
+        const dpi = self.font_size.dpi;
+        const char_size = @as(i32, @intCast(size_pixels)) * 64;
+        try face.setCharSize(char_size, char_size, dpi, dpi);
+
+        const font_face = FontFace{
+            .face = face,
+            .source = .{ .embedded = embedded_fonts.openmoji_black },
+            .coverage_hint = .emoji,
+        };
+
+        return FontFamily{
+            .regular = font_face,
+            .bold = null,
+            .italic = null,
+            .bold_italic = null,
+        };
     }
 
     /// Try to load a complete font family from system
@@ -339,6 +386,14 @@ pub const FontCollection = struct {
         coverage: FontFace.UnicodeRangeHint,
     ) ?FontFamily {
         const face = self.loadSystemFont(path, coverage) catch return null;
+
+        // Log font properties for debugging
+        log.warn("FONT LOADED: {s}", .{path});
+        log.warn("  is_scalable={}, has_fixed_sizes={}, num_fixed_sizes={}", .{
+            face.face.isScalable(),
+            face.face.hasFixedSizes(),
+            face.face.handle.*.num_fixed_sizes,
+        });
 
         return FontFamily{
             .regular = face,

@@ -122,7 +122,8 @@ pub const CellText = extern struct {
     bools: packed struct(u8) {
         no_min_contrast: bool = false,
         is_cursor_glyph: bool = false,
-        _padding: u6 = 0,
+        is_wide_char: bool = false, // True for double-width chars (emoji, CJK)
+        _padding: u5 = 0,
     } align(1) = .{},
     attributes: Attributes align(2) = .{},
 

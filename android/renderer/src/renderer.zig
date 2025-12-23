@@ -769,6 +769,7 @@ pub fn syncFromTerminal(self: *Self) !void {
                     cell.row,
                     cell.fg_color, // Use fg color for the background block
                     bg_attributes,
+                    1, // Block char is always single-width
                 ));
             }
 
@@ -778,6 +779,7 @@ pub fn syncFromTerminal(self: *Self) !void {
                 cell.row,
                 cell.fg_color,
                 attributes,
+                cell.width, // Pass character width (1 for normal, 2 for wide chars)
             ));
 
             // Strikethrough is now rendered in the fragment shader as a graphical overlay

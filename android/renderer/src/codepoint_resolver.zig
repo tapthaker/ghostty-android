@@ -179,6 +179,15 @@ pub const CodepointResolver = struct {
 
                     log.info("Found U+{X:0>4} in fallback font #{d} (glyph={d})", .{ codepoint, fallback_idx, glyph_index });
 
+                    // Debug: log font properties for emoji codepoints
+                    if (codepoint >= 0x1F000) {
+                        log.warn("EMOJI FONT: U+{X:0>4} - is_scalable={}, has_fixed_sizes={}", .{
+                            codepoint,
+                            face.face.isScalable(),
+                            face.face.hasFixedSizes(),
+                        });
+                    }
+
                     return resolution;
                 }
             }

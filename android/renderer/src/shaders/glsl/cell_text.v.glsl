@@ -31,6 +31,7 @@ const uint ATLAS_COLOR = 1u;
 // Masks for the `glyph_bools` attribute
 const uint NO_MIN_CONTRAST = 1u;
 const uint IS_CURSOR_GLYPH = 2u;
+const uint IS_WIDE_CHAR = 4u;
 
 // Masks for the `glyph_attributes` attribute (packed struct u16)
 const uint ATTR_BOLD = 1u;
@@ -129,15 +130,35 @@ void main() {
     offset.x = float(bearings.x);
     offset.y = baseline - float(bearings.y);
 
-    // Use cell-sized quad to ensure decorations (underline, strikethrough) can render
-    // Decorations are positioned relative to cell coordinates (0-1), so we need
-    // the quad to cover the full cell, not just the glyph area.
-    vec2 quad_pos = cell_pos + cell_size * corner;
+    // Determine quad width based on character width (1 for normal, 2 for wide chars)
+    bool is_wide_char = (glyph_bools & IS_WIDE_CHAR) != 0u;
+    float char_width = is_wide_char ? 2.0 : 1.0;
 
-    // Calculate glyph bounds within the cell (normalized 0-1)
+    // Use cell-sized quad (or double-width for wide chars like emoji/CJK)
+    // Decorations are positioned relative to cell coordinates (0-1), so we need
+    // the quad to cover the full cell(s), not just the glyph area.
+    vec2 quad_size = vec2(cell_size.x * char_width, cell_size.y);
+    vec2 quad_pos = cell_pos + quad_size * corner;
+
+    // For wide characters (emoji, CJK), center the glyph both horizontally and vertically
+    // This ensures consistent positioning regardless of individual glyph bearings
+    vec2 centered_offset = offset;
+    if (is_wide_char) {
+        // Center horizontally: add half of the extra space
+        float extra_space_x = quad_size.x - glyph_size_f.x;
+        centered_offset.x = max(0.0, extra_space_x / 2.0);
+
+        // Center vertically: this overrides the bearing-based positioning
+        // which can vary between emoji glyphs causing misalignment
+        float extra_space_y = quad_size.y - glyph_size_f.y;
+        centered_offset.y = max(0.0, extra_space_y / 2.0);
+    }
+
+    // Calculate glyph bounds within the quad (normalized 0-1)
+    // For wide chars, the quad spans multiple cells so we divide by quad_size
     // This tells the fragment shader where to sample the glyph texture
-    vec2 glyph_start = offset / cell_size;
-    vec2 glyph_end = (offset + glyph_size_f) / cell_size;
+    vec2 glyph_start = centered_offset / quad_size;
+    vec2 glyph_end = (centered_offset + glyph_size_f) / quad_size;
     out_glyph_bounds = vec4(glyph_start.x, glyph_start.y, glyph_end.x, glyph_end.y);
 
     // out_cell_coord is now correctly 0-1 across the cell

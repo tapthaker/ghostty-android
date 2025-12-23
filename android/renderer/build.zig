@@ -11,8 +11,8 @@ pub fn build(b: *std.Build) void {
     }
 
     // Get FreeType dependency
-    // Note: Disable libpng to avoid linking issues with libm on Android
-    // Note: Harfbuzz not needed for Phase 1 (basic ASCII rendering)
+    // Note: libpng disabled - CBDT color emoji won't work (uses PNG bitmaps)
+    // Using monochrome Noto Emoji or system fallback instead
     const freetype_dep = b.dependency("freetype", .{
         .target = target,
         .optimize = optimize,

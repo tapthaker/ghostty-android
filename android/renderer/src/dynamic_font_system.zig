@@ -399,6 +399,7 @@ pub const DynamicFontSystem = struct {
         grid_row: u16,
         color: [4]u8,
         attributes: shaders.CellText.Attributes,
+        char_width: u8,
     ) shaders.CellText {
         // Determine font style from attributes
         const style: FontStyle = if (attributes.bold and attributes.italic)
@@ -409,6 +410,9 @@ pub const DynamicFontSystem = struct {
             .italic
         else
             .regular;
+
+        // Determine if this is a wide character (width >= 2)
+        const is_wide = char_width >= 2;
 
         // Get glyph location from dynamic font system
         const location = self.getGlyphLocation(codepoint, style) catch |err| {
@@ -421,6 +425,7 @@ pub const DynamicFontSystem = struct {
                 .grid_pos = .{ grid_col, grid_row },
                 .color = color,
                 .atlas = .grayscale,
+                .bools = .{ .is_wide_char = is_wide },
                 .attributes = attributes,
             };
         } orelse {
@@ -432,6 +437,7 @@ pub const DynamicFontSystem = struct {
                 .grid_pos = .{ grid_col, grid_row },
                 .color = color,
                 .atlas = .grayscale,
+                .bools = .{ .is_wide_char = is_wide },
                 .attributes = attributes,
             };
         };
@@ -442,7 +448,11 @@ pub const DynamicFontSystem = struct {
             .bearings = .{ @as(i16, @intCast(location.bearing_x)), @as(i16, @intCast(location.bearing_y)) },
             .grid_pos = .{ grid_col, grid_row },
             .color = color,
-            .atlas = .grayscale,
+            .atlas = switch (location.atlas_type) {
+                .grayscale => .grayscale,
+                .rgba => .color,
+            },
+            .bools = .{ .is_wide_char = is_wide },
             .attributes = attributes,
         };
     }
