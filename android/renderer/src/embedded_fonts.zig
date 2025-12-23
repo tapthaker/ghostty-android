@@ -15,8 +15,8 @@ pub const jetbrains_mono_italic = @embedFile("JetBrainsMonoNerdFont-Italic.ttf")
 /// JetBrains Mono Bold Italic - For bold+italic text rendering
 pub const jetbrains_mono_bold_italic = @embedFile("JetBrainsMonoNerdFont-BoldItalic.ttf");
 
-/// OpenMoji Black - Monochrome outline emoji font
-/// License: CC BY-SA 4.0
-/// Source: https://github.com/hfg-gmuend/openmoji
-/// Note: Using monochrome version because CBDT color emoji requires libpng
-pub const openmoji_black = @embedFile("OpenMoji-Black.ttf");
+/// Twemoji Mozilla - Color emoji font using COLR/CPAL format
+/// License: CC BY 4.0 (Twitter emoji) + MIT (Mozilla font build)
+/// Source: https://github.com/mozilla/twemoji-colr
+/// Note: COLR/CPAL format works with FreeType without libpng (unlike CBDT)
+pub const twemoji_colr = @embedFile("Twemoji-Mozilla.ttf");

@@ -227,17 +227,19 @@ pub const GlyphCache = struct {
         }
 
         // Load and render the glyph
-        try face.face.loadGlyph(glyph_index, .{ .render = true, .color = false });
+        // Enable color rendering if the font has color tables (COLR, CBDT, sbix, SVG)
+        const has_color = face.face.hasColor();
+        try face.face.loadGlyph(glyph_index, .{ .render = true, .color = has_color });
 
         // Access glyph slot through handle
         const glyph = face.face.handle.*.glyph;
         const bitmap = &glyph.*.bitmap;
 
         // Determine format based on bitmap mode
-        // FreeType pixel modes: FT_PIXEL_MODE_GRAY = 2, FT_PIXEL_MODE_BGRA = 6
+        // FreeType pixel modes: FT_PIXEL_MODE_GRAY = 2, FT_PIXEL_MODE_BGRA = 7
         const format: RenderedGlyph.Format = switch (bitmap.pixel_mode) {
             2 => .grayscale, // FT_PIXEL_MODE_GRAY
-            6 => .rgba,      // FT_PIXEL_MODE_BGRA (color emoji)
+            7 => .rgba,      // FT_PIXEL_MODE_BGRA (color emoji)
             else => blk: {
                 log.warn("Unknown pixel_mode {} for glyph {}, defaulting to grayscale", .{ bitmap.pixel_mode, glyph_index });
                 break :blk .grayscale;

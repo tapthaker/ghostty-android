@@ -270,10 +270,10 @@ pub const FontCollection = struct {
             log.info("Loaded Noto CJK as fallback", .{});
         }
 
-        // Load embedded emoji font (CBDT format, works reliably with FreeType)
+        // Load embedded emoji font (Twemoji COLR/CPAL format, works without libpng)
         if (self.loadEmbeddedEmojiFont()) |family| {
             try self.fallbacks.append(self.allocator, family);
-            log.info("Loaded embedded Noto Color Emoji (CBDT) as fallback", .{});
+            log.info("Loaded embedded Twemoji Color (COLR) as fallback", .{});
         } else |err| {
             log.warn("Failed to load embedded emoji font: {}", .{err});
             // Fall back to system emoji font if embedded fails
@@ -294,9 +294,9 @@ pub const FontCollection = struct {
         }
     }
 
-    /// Load the embedded monochrome emoji font (OpenMoji Black)
+    /// Load the embedded color emoji font (Twemoji COLR/CPAL)
     fn loadEmbeddedEmojiFont(self: *FontCollection) !FontFamily {
-        var face = try self.library.initMemoryFace(embedded_fonts.openmoji_black, 0);
+        var face = try self.library.initMemoryFace(embedded_fonts.twemoji_colr, 0);
         errdefer face.deinit();
 
         // Verify the face handle is valid
@@ -308,12 +308,12 @@ pub const FontCollection = struct {
         // Log font properties
         const is_scalable = face.isScalable();
         const has_fixed_sizes = face.hasFixedSizes();
-        log.info("EMBEDDED EMOJI FONT (OpenMoji Black): is_scalable={}, has_fixed_sizes={}", .{
+        log.info("EMBEDDED EMOJI FONT (Twemoji COLR): is_scalable={}, has_fixed_sizes={}", .{
             is_scalable,
             has_fixed_sizes,
         });
 
-        // OpenMoji Black is a scalable outline font, set char size
+        // Twemoji COLR is a scalable color font using COLR/CPAL tables
         const font_size_px = self.font_size.toPixels();
         const size_pixels = @as(u32, @intFromFloat(@round(font_size_px)));
         const dpi = self.font_size.dpi;
@@ -322,7 +322,7 @@ pub const FontCollection = struct {
 
         const font_face = FontFace{
             .face = face,
-            .source = .{ .embedded = embedded_fonts.openmoji_black },
+            .source = .{ .embedded = embedded_fonts.twemoji_colr },
             .coverage_hint = .emoji,
         };
 

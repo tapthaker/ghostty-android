@@ -11,8 +11,7 @@ pub fn build(b: *std.Build) void {
     }
 
     // Get FreeType dependency
-    // Note: libpng disabled - CBDT color emoji won't work (uses PNG bitmaps)
-    // Using monochrome Noto Emoji or system fallback instead
+    // Note: Using Twemoji COLR font which doesn't need libpng
     const freetype_dep = b.dependency("freetype", .{
         .target = target,
         .optimize = optimize,
