@@ -27,6 +27,7 @@ pub fn init(allocator: Allocator, cols: u16, rows: u16) !TerminalManager {
         .default_modes = .{
             .linefeed = true, // LNM mode: make \n act as \r\n (newline with carriage return)
             .wraparound = true, // Enable text reflow when terminal is resized
+            .grapheme_cluster = true, // Enable proper grapheme width handling (mode 2027)
         },
     });
 

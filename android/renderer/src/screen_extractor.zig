@@ -9,7 +9,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ghostty_vt = @import("ghostty-vt");
-const codepoint_width = @import("codepoint_width.zig");
 
 const log = std.log.scoped(.screen_extractor);
 
@@ -117,10 +116,27 @@ pub fn extractCells(
             };
 
             // Handle spacer cells for wide characters
-            // Check if this is a spacer cell (continuation of wide char)
+            // Spacer cells need to emit CellData for proper background rendering,
+            // otherwise the cell_bg_colors array won't be populated and the global
+            // background color will show through.
             if (cell.wide == .spacer_tail or cell.wide == .spacer_head) {
-                // This is a spacer cell for a wide character
-                // Skip it but still account for the cell position
+                // Emit a cell with background color but no glyph
+                try cells.append(allocator, .{
+                    .codepoint = 0, // No character to render
+                    .grapheme_cluster = null,
+                    .width = 0,
+                    .is_wide_continuation = true,
+                    .fg_color = .{ fg_rgb.r, fg_rgb.g, fg_rgb.b, 255 },
+                    .bg_color = .{ bg_rgb.r, bg_rgb.g, bg_rgb.b, 255 },
+                    .col = @intCast(col),
+                    .row = @intCast(row),
+                    .bold = false,
+                    .italic = false,
+                    .dim = false,
+                    .strikethrough = false,
+                    .underline = .none,
+                    .inverse = false,
+                });
                 continue;
             }
 
@@ -140,8 +156,15 @@ pub fn extractCells(
                 .bg_color_palette, .bg_color_rgb => ' ', // Color-only cells render as space
             };
 
-            // Get the character width
-            const char_width = codepoint_width.codepointWidth(primary_codepoint);
+            // Get the character width from ghostty-vt's cell.wide field
+            // With grapheme_cluster mode (2027) enabled, ghostty-vt correctly handles:
+            // - Unicode East Asian Width
+            // - Emoji with variation selectors (U+FE0F makes chars like ❤ double-width)
+            const char_width: u8 = switch (cell.wide) {
+                .wide => 2,
+                .narrow => 1,
+                .spacer_head, .spacer_tail => 0, // Already filtered above at line 123
+            };
 
             // Extract text style attributes from VT style flags
             const underline_type: CellData.Underline = switch (style_val.flags.underline) {
