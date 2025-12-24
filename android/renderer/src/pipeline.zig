@@ -101,7 +101,9 @@ pub fn deinit(self: *const Self) void {
 /// Automatically configure vertex attributes based on a struct type.
 /// This inspects the struct fields and sets up appropriate vertex attribute
 /// pointers based on field types and offsets.
-fn autoConfigureAttributes(
+/// The VAO must be bound before calling this function.
+/// The buffer containing vertex data must be bound to GL_ARRAY_BUFFER.
+pub fn autoConfigureAttributes(
     comptime T: type,
     step_fn: Options.StepFunction,
 ) !void {

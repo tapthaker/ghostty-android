@@ -64,6 +64,20 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     // Frame callback for scroll animation
     private val scrollAnimationCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
+            // Check if we should stop animation (e.g., scrollToBottom was called externally,
+            // or terminal was cleared and no longer has scrollback)
+            if (renderer.isViewportAtBottom() && renderer.getScrollbackRows() == 0) {
+                scroller.forceFinished(true)
+                isAnimating = false
+                scrollPixelOffset = 0f
+                lastScrollerRow = 0
+                queueEvent {
+                    renderer.setScrollPixelOffset(0f)
+                    requestRender()
+                }
+                return
+            }
+
             if (!scroller.computeScrollOffset()) {
                 // Animation finished - reset pixel offset to clean state
                 isAnimating = false
@@ -523,4 +537,19 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     fun triggerRender() {
         requestRender()
     }
+
+    /**
+     * Enable or disable the FPS display overlay.
+     *
+     * When enabled, the current frames per second is rendered at the
+     * top-right corner of the terminal.
+     */
+    var showFps: Boolean = true
+        set(value) {
+            field = value
+            queueEvent {
+                renderer.setShowFps(value)
+                requestRender()
+            }
+        }
 }

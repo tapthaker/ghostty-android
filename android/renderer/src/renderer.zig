@@ -71,9 +71,26 @@ cell_text_pipeline: Pipeline,
 /// Number of glyphs to render (for testing)
 num_test_glyphs: u32 = 0,
 
+/// FPS overlay glyph buffer (separate from main glyphs to avoid scroll interference)
+fps_glyphs_buffer: Buffer(shaders.CellText),
+
+/// VAO for FPS overlay (separate from main VAO to draw from fps_glyphs_buffer)
+fps_vao: gl.VertexArray,
+
+/// Number of FPS overlay glyphs
+num_fps_glyphs: u32 = 0,
+
 /// Visual scroll pixel offset for smooth sub-row scrolling (0 to cell_height)
 /// This is used to provide smooth scrolling between row boundaries
 scroll_pixel_offset: f32 = 0.0,
+
+/// Whether to display FPS overlay
+show_fps: bool = true,
+
+/// FPS tracking fields
+last_frame_time: i64 = 0,
+frame_count: u32 = 0,
+current_fps: u32 = 0,
 
 /// Initialize the renderer with optional initial dimensions
 pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Self {
@@ -267,6 +284,24 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Se
     }, max_cells);
     errdefer glyphs_buffer.deinit();
 
+    // Create FPS overlay buffer (capacity for bg blocks + text glyphs)
+    var fps_glyphs_buffer = try Buffer(shaders.CellText).init(.{
+        .target = .array,
+        .usage = .dynamic_draw,
+    }, 32);
+    errdefer fps_glyphs_buffer.deinit();
+
+    // Create VAO for FPS overlay (must be separate from main VAO because
+    // OpenGL ES 3.1 VAOs store the buffer ID when glVertexAttribPointer is called)
+    const fps_vao = try gl.VertexArray.create();
+    errdefer fps_vao.delete();
+
+    // Configure FPS VAO with fps_glyphs_buffer bound
+    fps_vao.bind();
+    fps_glyphs_buffer.buffer.bind(fps_glyphs_buffer.opts.target);
+    try Pipeline.autoConfigureAttributes(shaders.CellText, .per_instance);
+    gl.VertexArray.unbind();
+
     // Bind the buffer so it's active when VAO attributes are configured
     glyphs_buffer.buffer.bind(glyphs_buffer.opts.target);
 
@@ -377,6 +412,8 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Se
         .atlas_color = atlas_color,
         .atlas_dims_buffer = atlas_dims_buffer,
         .glyphs_buffer = glyphs_buffer,
+        .fps_glyphs_buffer = fps_glyphs_buffer,
+        .fps_vao = fps_vao,
         .cell_text_pipeline = cell_text_pipeline,
         .num_test_glyphs = 0,
     };
@@ -385,6 +422,8 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Se
 pub fn deinit(self: *Self) void {
     log.info("Destroying renderer", .{});
     self.cell_text_pipeline.deinit();
+    self.fps_vao.delete();
+    self.fps_glyphs_buffer.deinit();
     self.glyphs_buffer.deinit();
     self.atlas_dims_buffer.deinit();
     self.atlas_color.deinit();
@@ -476,8 +515,27 @@ fn syncUniforms(self: *Self) !void {
 
 /// Render a frame
 pub fn render(self: *Self) !void {
+    // Update FPS counter
+    const now: i64 = @truncate(std.time.nanoTimestamp());
+    self.frame_count += 1;
+
+    // Update FPS every 500ms
+    // Guard against clock issues (negative elapsed, division by zero)
+    const elapsed = now - self.last_frame_time;
+    if (elapsed >= 500_000_000) { // 500ms in nanoseconds
+        // Calculate FPS: frames / (elapsed_seconds)
+        // Clamp to reasonable range to avoid overflow
+        const fps = @divFloor(@as(i64, self.frame_count) * 1_000_000_000, elapsed);
+        self.current_fps = if (fps > 0 and fps <= 9999) @intCast(fps) else if (fps > 9999) 9999 else 0;
+        self.frame_count = 0;
+        self.last_frame_time = now;
+    }
+
     // Sync renderer state from terminal (extract cells and update GPU buffers)
     try self.syncFromTerminal();
+
+    // Sync FPS overlay to separate buffer (rendered with scroll_pixel_offset=0)
+    try self.syncFpsOverlay();
 
     // Clear with transparent black (will be overwritten by bg_color shader)
     gl.clearColor(0.0, 0.0, 0.0, 0.0);
@@ -534,6 +592,34 @@ pub fn render(self: *Self) !void {
         };
     } else {
         log.warn("num_test_glyphs is 0, skipping text rendering", .{});
+    }
+
+    // ============================================================================
+    // FPS Overlay Pass (rendered with scroll_pixel_offset=0 to stay fixed)
+    // ============================================================================
+    if (self.num_fps_glyphs > 0) {
+        // Save current scroll offset
+        const saved_scroll_offset = self.uniforms.scroll_pixel_offset;
+
+        // Temporarily set scroll_pixel_offset to 0 so FPS doesn't scroll
+        self.uniforms.scroll_pixel_offset = 0.0;
+        try self.syncUniforms();
+
+        // Bind the FPS VAO (which is configured to use fps_glyphs_buffer)
+        // We must use a separate VAO because in OpenGL ES 3.1, the VAO stores
+        // the buffer ID when glVertexAttribPointer is called
+        self.fps_vao.bind();
+
+        // Draw FPS glyphs
+        log.debug("Drawing {} FPS glyphs", .{self.num_fps_glyphs});
+        gl.drawArraysInstanced(gl.GL_TRIANGLE_STRIP, 0, 4, @intCast(self.num_fps_glyphs));
+        gl.checkError() catch |err| {
+            log.err("GL error after FPS drawArraysInstanced: {}", .{err});
+        };
+
+        // Restore original scroll offset
+        self.uniforms.scroll_pixel_offset = saved_scroll_offset;
+        // Note: We don't need to sync uniforms again since this is the end of render()
     }
 }
 
@@ -804,6 +890,8 @@ pub fn syncFromTerminal(self: *Self) !void {
         wide_char_count,
     });
 
+    // Note: FPS overlay is now rendered separately in render() with scroll_pixel_offset=0
+
     // Log sample of first row content for debugging
     if (cells.len > 0) {
         var sample_text: [80]u8 = undefined;
@@ -875,4 +963,89 @@ pub fn scrollToBottom(self: *Self) void {
 pub fn setScrollPixelOffset(self: *Self, offset: f32) void {
     self.scroll_pixel_offset = offset;
     self.uniforms.scroll_pixel_offset = offset;
+}
+
+// ============================================================================
+// FPS Overlay
+// ============================================================================
+
+/// Enable or disable FPS display overlay
+pub fn setShowFps(self: *Self, show: bool) void {
+    log.info("setShowFps: {}", .{show});
+    self.show_fps = show;
+}
+
+/// Sync FPS overlay glyphs to the separate FPS buffer
+/// This is called from render() and updates fps_glyphs_buffer directly.
+fn syncFpsOverlay(self: *Self) !void {
+    if (!self.show_fps) {
+        self.num_fps_glyphs = 0;
+        return;
+    }
+    if (self.grid_cols < 8) {
+        self.num_fps_glyphs = 0;
+        return;
+    }
+
+    // Format FPS string: "FPS:XXX" (7 chars max)
+    var buf: [10]u8 = undefined;
+    const fps_text = std.fmt.bufPrint(&buf, "FPS:{d:3}", .{self.current_fps}) catch {
+        self.num_fps_glyphs = 0;
+        return;
+    };
+
+    // Position at top-right (row 0, rightmost columns)
+    const text_len: u16 = @intCast(@min(fps_text.len, self.grid_cols));
+    const start_col: u16 = self.grid_cols - text_len;
+
+    // Colors for FPS overlay
+    const bg_color = [4]u8{ 0, 0, 0, 255 }; // Fully opaque black background
+    const text_color = [4]u8{ 0, 255, 0, 255 }; // Bright green text
+
+    // No special attributes
+    const attributes = shaders.CellText.Attributes{};
+
+    // Build glyph array for FPS overlay
+    // First add background blocks, then text glyphs
+    var fps_glyphs: [32]shaders.CellText = undefined;
+    var glyph_count: u32 = 0;
+
+    // Add background blocks (full block character)
+    const block_char: u32 = 0x2588; // █ Full block character
+    for (fps_text, 0..) |_, i| {
+        const col = start_col +| @as(u16, @intCast(i));
+        if (col >= self.grid_cols) break;
+        if (glyph_count >= 16) break;
+
+        fps_glyphs[glyph_count] = (&self.font_system).makeCellText(
+            block_char,
+            col,
+            0, // top row
+            bg_color,
+            attributes,
+            1, // single width
+        );
+        glyph_count += 1;
+    }
+
+    // Add text glyphs on top
+    for (fps_text, 0..) |char, i| {
+        const col = start_col +| @as(u16, @intCast(i));
+        if (col >= self.grid_cols) break;
+        if (glyph_count >= 32) break;
+
+        fps_glyphs[glyph_count] = (&self.font_system).makeCellText(
+            char,
+            col,
+            0, // top row
+            text_color,
+            attributes,
+            1, // single width
+        );
+        glyph_count += 1;
+    }
+
+    // Upload to FPS buffer
+    try self.fps_glyphs_buffer.sync(fps_glyphs[0..glyph_count]);
+    self.num_fps_glyphs = glyph_count;
 }

@@ -505,6 +505,26 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetScrollPixel
     }
 }
 
+/// Enable or disable FPS display overlay
+/// Java signature: void nativeSetShowFps(boolean show)
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetShowFps(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    show: c.jboolean,
+) void {
+    _ = env;
+    _ = obj;
+
+    if (!renderer_state.initialized) {
+        log.warn("Attempted to set show FPS before renderer initialized", .{});
+        return;
+    }
+
+    if (renderer_state.renderer) |*renderer| {
+        renderer.setShowFps(show == c.JNI_TRUE);
+    }
+}
+
 // Comptime test to ensure JNI function names are correct
 comptime {
     // This will cause a compile error if the function signatures don't match
@@ -523,4 +543,6 @@ comptime {
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetViewportOffset;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeScrollToBottom;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetScrollPixelOffset;
+    // FPS display
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetShowFps;
 }

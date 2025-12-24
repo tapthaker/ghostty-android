@@ -65,6 +65,9 @@ class TestRunner(
         val startTime = System.currentTimeMillis()
 
         return try {
+            // Scroll to bottom to ensure we see the active area, not scrollback
+            renderer.scrollToBottom()
+
             // Clear the terminal first
             renderer.processInput("\u001B[2J\u001B[H")
 

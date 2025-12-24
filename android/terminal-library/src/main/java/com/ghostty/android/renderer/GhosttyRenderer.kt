@@ -48,6 +48,9 @@ class GhosttyRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private external fun nativeScrollToBottom()
     private external fun nativeSetScrollPixelOffset(offset: Float)
 
+    // FPS display native method
+    private external fun nativeSetShowFps(show: Boolean)
+
     /**
      * Called when the OpenGL surface is created.
      *
@@ -270,10 +273,13 @@ class GhosttyRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     /**
      * Scroll viewport to the bottom (active area).
+     * Also resets the visual scroll pixel offset to 0.
      */
     fun scrollToBottom() {
         try {
             nativeScrollToBottom()
+            // Also reset the visual scroll pixel offset
+            nativeSetScrollPixelOffset(0f)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeScrollToBottom", e)
         }
@@ -293,6 +299,26 @@ class GhosttyRenderer(private val context: Context) : GLSurfaceView.Renderer {
             nativeSetScrollPixelOffset(offset)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeSetScrollPixelOffset", e)
+        }
+    }
+
+    // ============================================================================
+    // FPS Display API
+    // ============================================================================
+
+    /**
+     * Enable or disable the FPS display overlay.
+     *
+     * When enabled, the current frames per second is rendered at the
+     * top-right corner of the terminal.
+     *
+     * @param show true to show FPS, false to hide
+     */
+    fun setShowFps(show: Boolean) {
+        try {
+            nativeSetShowFps(show)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeSetShowFps", e)
         }
     }
 }
