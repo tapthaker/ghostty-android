@@ -71,6 +71,10 @@ cell_text_pipeline: Pipeline,
 /// Number of glyphs to render (for testing)
 num_test_glyphs: u32 = 0,
 
+/// Visual scroll pixel offset for smooth sub-row scrolling (0 to cell_height)
+/// This is used to provide smooth scrolling between row boundaries
+scroll_pixel_offset: f32 = 0.0,
+
 /// Initialize the renderer with optional initial dimensions
 pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Self {
     log.info("Initializing renderer with dimensions: {d}x{d}", .{ width, height });
@@ -863,4 +867,12 @@ pub fn getViewportOffset(self: *Self) usize {
 /// Scroll viewport to the bottom (active area)
 pub fn scrollToBottom(self: *Self) void {
     self.terminal_manager.scrollToBottom();
+}
+
+/// Set the visual scroll pixel offset for smooth sub-row scrolling
+/// This offset is applied in the shaders to shift content by a sub-row amount
+/// for smooth scrolling animation between row boundaries.
+pub fn setScrollPixelOffset(self: *Self, offset: f32) void {
+    self.scroll_pixel_offset = offset;
+    self.uniforms.scroll_pixel_offset = offset;
 }

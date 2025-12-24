@@ -60,6 +60,11 @@ pub const Uniforms = extern struct {
     /// Used for positioning glyphs correctly based on their bearings.
     baseline: f32 align(4),
 
+    /// Visual scroll pixel offset for smooth sub-row scrolling.
+    /// This is the Y offset in pixels to apply to all rendered content
+    /// for smooth scrolling between row boundaries.
+    scroll_pixel_offset: f32 align(4) = 0.0,
+
     pub const Bools = packed struct(u32) {
         /// Whether the cursor is 2 cells wide.
         cursor_wide: bool,

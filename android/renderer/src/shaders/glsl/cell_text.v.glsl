@@ -168,7 +168,11 @@ void main() {
     // Fragment shader will calculate texture coords from cell_coord and glyph_bounds
     out_tex_coord = vec2(0.0);
 
-    gl_Position = projection_matrix * vec4(quad_pos.x, quad_pos.y, 0.0, 1.0);
+    // Apply visual scroll pixel offset for smooth sub-row scrolling
+    vec2 scroll_adjusted_pos = quad_pos;
+    scroll_adjusted_pos.y -= scroll_pixel_offset;
+
+    gl_Position = projection_matrix * vec4(scroll_adjusted_pos.x, scroll_adjusted_pos.y, 0.0, 1.0);
 
     // Get our color. We always fetch a linearized version to
     // make it easier to handle minimum contrast calculations.

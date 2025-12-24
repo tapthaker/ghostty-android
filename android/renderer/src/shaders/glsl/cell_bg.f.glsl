@@ -18,6 +18,10 @@ vec4 cell_bg() {
     vec2 frag_coord = gl_FragCoord.xy;
     frag_coord.y = screen_size.y - frag_coord.y;
 
+    // Apply visual scroll pixel offset for smooth sub-row scrolling
+    // Adding to Y shifts which cell this fragment maps to
+    frag_coord.y += scroll_pixel_offset;
+
     ivec2 grid_pos = ivec2(floor((frag_coord - grid_padding.wx) / cell_size));
     bool use_linear_blending = (bools & USE_LINEAR_BLENDING) != 0u;
 

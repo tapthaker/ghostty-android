@@ -484,6 +484,27 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeScrollToBottom
     }
 }
 
+/// Set the visual scroll pixel offset for smooth sub-row scrolling
+/// This offset is applied in the shaders to shift content smoothly
+/// between row boundaries during scroll animations.
+/// Java signature: void nativeSetScrollPixelOffset(float offset)
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetScrollPixelOffset(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    offset: c.jfloat,
+) void {
+    _ = env;
+    _ = obj;
+
+    if (!renderer_state.initialized) {
+        return;
+    }
+
+    if (renderer_state.renderer) |*renderer| {
+        renderer.setScrollPixelOffset(offset);
+    }
+}
+
 // Comptime test to ensure JNI function names are correct
 comptime {
     // This will cause a compile error if the function signatures don't match
@@ -501,4 +522,5 @@ comptime {
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeIsViewportAtBottom;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetViewportOffset;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeScrollToBottom;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetScrollPixelOffset;
 }

@@ -30,6 +30,7 @@ layout(binding = 0, std140) uniform Globals {
     uniform uint bools;
     uniform vec4 font_decoration_metrics;
     uniform float baseline;
+    uniform float scroll_pixel_offset;
 };
 
 // Bools

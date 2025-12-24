@@ -46,6 +46,7 @@ class GhosttyRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private external fun nativeIsViewportAtBottom(): Boolean
     private external fun nativeGetViewportOffset(): Int
     private external fun nativeScrollToBottom()
+    private external fun nativeSetScrollPixelOffset(offset: Float)
 
     /**
      * Called when the OpenGL surface is created.
@@ -275,6 +276,23 @@ class GhosttyRenderer(private val context: Context) : GLSurfaceView.Renderer {
             nativeScrollToBottom()
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeScrollToBottom", e)
+        }
+    }
+
+    /**
+     * Set the visual scroll pixel offset for smooth sub-row scrolling.
+     *
+     * This offset is applied in the shaders to shift content smoothly
+     * between row boundaries during scroll animations. The offset should
+     * be in the range [0, fontLineSpacing).
+     *
+     * @param offset Pixel offset for sub-row scrolling
+     */
+    fun setScrollPixelOffset(offset: Float) {
+        try {
+            nativeSetScrollPixelOffset(offset)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeSetScrollPixelOffset", e)
         }
     }
 }
