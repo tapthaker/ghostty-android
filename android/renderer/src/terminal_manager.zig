@@ -106,3 +106,45 @@ pub fn getSize(self: *const TerminalManager) struct { cols: u16, rows: u16 } {
 pub fn getTerminal(self: *TerminalManager) *ghostty_vt.Terminal {
     return &self.terminal;
 }
+
+/// Get the number of scrollback rows available (rows above the active area)
+pub fn getScrollbackRows(self: *TerminalManager) usize {
+    const screen = self.terminal.screens.get(.primary).?;
+    // total_rows includes both scrollback and active area
+    // scrollback = total_rows - active_rows
+    const total = screen.pages.total_rows;
+    const active = screen.pages.rows;
+    if (total > active) {
+        return total - active;
+    }
+    return 0;
+}
+
+/// Scroll the viewport by a delta number of rows
+/// Positive delta scrolls down (towards newer content/active area)
+/// Negative delta scrolls up (towards older content/scrollback)
+pub fn scrollDelta(self: *TerminalManager, delta: i32) void {
+    const screen = self.terminal.screens.get(.primary).?;
+    screen.pages.scroll(.{ .delta_row = delta });
+    log.debug("Scrolled viewport by {} rows", .{delta});
+}
+
+/// Check if viewport is at the bottom (following active area)
+pub fn isViewportAtBottom(self: *TerminalManager) bool {
+    const screen = self.terminal.screens.get(.primary).?;
+    return screen.viewportIsBottom();
+}
+
+/// Get the current scroll offset from the top (0 = at top of scrollback)
+pub fn getViewportOffset(self: *TerminalManager) usize {
+    var screen = self.terminal.screens.get(.primary).?;
+    const scrollbar = screen.pages.scrollbar();
+    return scrollbar.offset;
+}
+
+/// Scroll viewport to the bottom (active area)
+pub fn scrollToBottom(self: *TerminalManager) void {
+    const screen = self.terminal.screens.get(.primary).?;
+    screen.pages.scroll(.active);
+    log.debug("Scrolled viewport to bottom (active area)", .{});
+}

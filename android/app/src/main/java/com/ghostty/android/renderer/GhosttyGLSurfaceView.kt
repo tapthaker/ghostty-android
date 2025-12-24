@@ -1,11 +1,16 @@
 package com.ghostty.android.renderer
 
 import android.content.Context
+import android.graphics.Canvas
 import android.opengl.GLSurfaceView
 import android.util.AttributeSet
 import android.util.Log
+import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
+import android.widget.EdgeEffect
+import android.widget.OverScroller
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -39,7 +44,14 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
     private val renderer: GhosttyRenderer
     private val scaleGestureDetector: ScaleGestureDetector
+    private val gestureDetector: GestureDetector
+    private val scroller: OverScroller
+    private val edgeEffectTop: EdgeEffect
+    private val edgeEffectBottom: EdgeEffect
     private var currentFontSize = DEFAULT_FONT_SIZE
+
+    // Accumulated scroll distance for sub-row scrolling
+    private var scrollAccumulator = 0f
 
     init {
         Log.d(TAG, "Initializing Ghostty GL Surface View")
@@ -135,7 +147,189 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
             }
         })
 
+        // Initialize scroll gesture detector
+        gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean {
+                // Abort any ongoing fling animation
+                scroller.forceFinished(true)
+                scrollAccumulator = 0f
+                return true
+            }
+
+            override fun onScroll(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                distanceX: Float,
+                distanceY: Float
+            ): Boolean {
+                // Don't scroll if we're in a scale gesture
+                if (scaleGestureDetector.isInProgress) {
+                    return false
+                }
+
+                // Get font line spacing for converting pixels to rows
+                val fontLineSpacing = renderer.getFontLineSpacing()
+                if (fontLineSpacing <= 0) return false
+
+                // Accumulate scroll distance
+                scrollAccumulator += distanceY
+
+                // Calculate how many full rows to scroll
+                val rowsDelta = (scrollAccumulator / fontLineSpacing).toInt()
+
+                if (rowsDelta != 0) {
+                    // Remove the scrolled amount from accumulator
+                    scrollAccumulator -= rowsDelta * fontLineSpacing
+
+                    // Scroll the viewport
+                    // Android natural scrolling: distanceY > 0 means finger moved up
+                    // This should scroll DOWN (towards newer content, positive delta)
+                    // distanceY < 0 means finger moved down, scroll UP (towards older, negative delta)
+                    queueEvent {
+                        renderer.scrollDelta(rowsDelta)
+                        requestRender()
+                    }
+
+                    // Handle edge effects at boundaries
+                    val scrollbackRows = renderer.getScrollbackRows()
+                    val isAtTop = renderer.getViewportOffset() == 0
+                    val isAtBottom = renderer.isViewportAtBottom()
+
+                    // rowsDelta > 0 means scrolling down (towards bottom/active area)
+                    // rowsDelta < 0 means scrolling up (towards top/scrollback)
+                    if (isAtTop && rowsDelta < 0) {
+                        // Trying to scroll past the top (into more scrollback) - trigger top edge effect
+                        edgeEffectTop.onPull(abs(distanceY) / height)
+                        edgeEffectTop.setSize(width, height)
+                    } else if (isAtBottom && rowsDelta > 0) {
+                        // Trying to scroll past the bottom (beyond active area) - trigger bottom edge effect
+                        edgeEffectBottom.onPull(abs(distanceY) / height)
+                        edgeEffectBottom.setSize(width, height)
+                    }
+                }
+
+                return true
+            }
+
+            override fun onFling(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                velocityX: Float,
+                velocityY: Float
+            ): Boolean {
+                // Don't fling if we're in a scale gesture
+                if (scaleGestureDetector.isInProgress) {
+                    return false
+                }
+
+                val scrollbackRows = renderer.getScrollbackRows()
+                if (scrollbackRows == 0) return false
+
+                val fontLineSpacing = renderer.getFontLineSpacing()
+                if (fontLineSpacing <= 0) return false
+
+                // Convert velocity from pixels to rows
+                // Scale down velocity for smoother feel
+                val velocityInRows = (velocityY / fontLineSpacing * 0.5f).toInt()
+
+                // Get current and max positions (in rows)
+                val currentOffset = renderer.getViewportOffset()
+                val maxOffset = scrollbackRows
+
+                // Start fling animation
+                // startY = current offset, we want to scroll from 0 to maxOffset
+                scroller.forceFinished(true)
+                scroller.fling(
+                    0, currentOffset,           // startX, startY
+                    0, velocityInRows,          // velocityX, velocityY
+                    0, 0,                       // minX, maxX
+                    0, maxOffset,               // minY, maxY (0 = top, maxOffset = bottom)
+                    0, height / 4               // overX, overY (allow some overfling)
+                )
+
+                postInvalidateOnAnimation()
+                return true
+            }
+        })
+
+        // Initialize OverScroller for fling physics
+        scroller = OverScroller(context)
+
+        // Initialize edge effects for overscroll feedback
+        edgeEffectTop = EdgeEffect(context)
+        edgeEffectBottom = EdgeEffect(context)
+
         Log.d(TAG, "GL Surface View initialized")
+    }
+
+    /**
+     * Called during draw to update scroller animation and edge effects.
+     */
+    override fun computeScroll() {
+        super.computeScroll()
+
+        if (scroller.computeScrollOffset()) {
+            // Scroller is still animating
+            val currentY = scroller.currY
+            val prevOffset = renderer.getViewportOffset()
+
+            if (currentY != prevOffset) {
+                val delta = currentY - prevOffset
+
+                // Update viewport on GL thread
+                queueEvent {
+                    renderer.scrollDelta(delta)
+                    requestRender()
+                }
+            }
+
+            // Handle edge effects at fling boundaries
+            if (scroller.isOverScrolled) {
+                val currVelocity = scroller.currVelocity.toInt()
+                if (currentY <= 0 && !edgeEffectTop.isFinished) {
+                    edgeEffectTop.onAbsorb(currVelocity)
+                } else if (currentY >= renderer.getScrollbackRows() && !edgeEffectBottom.isFinished) {
+                    edgeEffectBottom.onAbsorb(currVelocity)
+                }
+            }
+
+            // Continue animation
+            postInvalidateOnAnimation()
+        }
+
+        // Always draw edge effects if active
+        if (!edgeEffectTop.isFinished || !edgeEffectBottom.isFinished) {
+            postInvalidateOnAnimation()
+        }
+    }
+
+    /**
+     * Draw edge effects on top of the GL surface.
+     */
+    override fun draw(canvas: Canvas) {
+        super.draw(canvas)
+
+        // Draw top edge effect
+        if (!edgeEffectTop.isFinished) {
+            val restoreCount = canvas.save()
+            edgeEffectTop.setSize(width, height)
+            if (edgeEffectTop.draw(canvas)) {
+                postInvalidateOnAnimation()
+            }
+            canvas.restoreToCount(restoreCount)
+        }
+
+        // Draw bottom edge effect
+        if (!edgeEffectBottom.isFinished) {
+            val restoreCount = canvas.save()
+            canvas.translate(0f, height.toFloat())
+            canvas.rotate(180f, width / 2f, 0f)
+            edgeEffectBottom.setSize(width, height)
+            if (edgeEffectBottom.draw(canvas)) {
+                postInvalidateOnAnimation()
+            }
+            canvas.restoreToCount(restoreCount)
+        }
     }
 
     /**
@@ -213,34 +407,33 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     }
 
     /**
-     * Handle touch events for pinch-to-zoom and other gestures.
+     * Handle touch events for pinch-to-zoom, scrolling, and other gestures.
      */
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        // First, let the scale gesture detector handle the event
+        // Let both gesture detectors process the event
+        // Scale detector should take priority
         val scaleHandled = scaleGestureDetector.onTouchEvent(event)
 
-        // Also handle basic touch events for future features
-        if (!scaleHandled) {
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    Log.v(TAG, "Touch down at (${event.x}, ${event.y})")
-                    // Future: Handle touch down
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    // Only log if not scaling
-                    if (!scaleGestureDetector.isInProgress) {
-                        Log.v(TAG, "Touch move to (${event.x}, ${event.y})")
-                        // Future: Handle touch move (scrolling, selection)
-                    }
-                }
-                MotionEvent.ACTION_UP -> {
-                    Log.v(TAG, "Touch up at (${event.x}, ${event.y})")
-                    // Future: Handle touch up
+        // Let scroll gesture detector handle the event
+        // Only process scroll if we're not in a scale gesture
+        val scrollHandled = if (!scaleGestureDetector.isInProgress) {
+            gestureDetector.onTouchEvent(event)
+        } else {
+            false
+        }
+
+        // Handle edge effect release on ACTION_UP or ACTION_CANCEL
+        when (event.action) {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                edgeEffectTop.onRelease()
+                edgeEffectBottom.onRelease()
+                if (!edgeEffectTop.isFinished || !edgeEffectBottom.isFinished) {
+                    postInvalidateOnAnimation()
                 }
             }
         }
 
-        return true // Consume the event
+        return scaleHandled || scrollHandled || true // Consume the event
     }
 
     /**

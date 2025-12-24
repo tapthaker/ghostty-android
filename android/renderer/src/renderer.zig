@@ -828,3 +828,39 @@ pub fn processTerminalInput(self: *Self, data: []const u8) !void {
     try self.terminal_manager.processInput(data);
     try self.syncFromTerminal();
 }
+
+// ============================================================================
+// Scrolling API
+// ============================================================================
+
+/// Get the number of scrollback rows available
+pub fn getScrollbackRows(self: *Self) usize {
+    return self.terminal_manager.getScrollbackRows();
+}
+
+/// Get the font line spacing (cell height) for scroll calculations
+pub fn getFontLineSpacing(self: *Self) f32 {
+    return self.uniforms.cell_size[1];
+}
+
+/// Scroll the viewport by a delta number of rows
+/// Positive delta scrolls down (towards newer content/active area)
+/// Negative delta scrolls up (towards older content/scrollback)
+pub fn scrollDelta(self: *Self, delta: i32) void {
+    self.terminal_manager.scrollDelta(delta);
+}
+
+/// Check if viewport is at the bottom (following active area)
+pub fn isViewportAtBottom(self: *Self) bool {
+    return self.terminal_manager.isViewportAtBottom();
+}
+
+/// Get the current scroll offset from the top (0 = at top of scrollback)
+pub fn getViewportOffset(self: *Self) usize {
+    return self.terminal_manager.getViewportOffset();
+}
+
+/// Scroll viewport to the bottom (active area)
+pub fn scrollToBottom(self: *Self) void {
+    self.terminal_manager.scrollToBottom();
+}

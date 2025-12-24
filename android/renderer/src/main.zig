@@ -353,6 +353,137 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeProcessInput(
     }
 }
 
+// ============================================================================
+// Scrolling JNI Methods
+// ============================================================================
+
+/// Get the number of scrollback rows available
+/// Java signature: int nativeGetScrollbackRows()
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetScrollbackRows(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) c.jint {
+    _ = env;
+    _ = obj;
+
+    if (!renderer_state.initialized) {
+        log.warn("Attempted to get scrollback rows before renderer initialized", .{});
+        return 0;
+    }
+
+    if (renderer_state.renderer) |*renderer| {
+        const rows = renderer.getScrollbackRows();
+        return @intCast(rows);
+    }
+
+    return 0;
+}
+
+/// Get the font line spacing (cell height) for scroll calculations
+/// Java signature: float nativeGetFontLineSpacing()
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetFontLineSpacing(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) c.jfloat {
+    _ = env;
+    _ = obj;
+
+    if (!renderer_state.initialized) {
+        log.warn("Attempted to get font line spacing before renderer initialized", .{});
+        return 20.0; // Default fallback
+    }
+
+    if (renderer_state.renderer) |*renderer| {
+        return renderer.getFontLineSpacing();
+    }
+
+    return 20.0; // Default fallback
+}
+
+/// Scroll the viewport by a delta number of rows
+/// Positive delta scrolls down (towards newer content/active area)
+/// Negative delta scrolls up (towards older content/scrollback)
+/// Java signature: void nativeScrollDelta(int delta)
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeScrollDelta(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    delta: c.jint,
+) void {
+    _ = env;
+    _ = obj;
+
+    if (!renderer_state.initialized) {
+        log.warn("Attempted to scroll before renderer initialized", .{});
+        return;
+    }
+
+    if (renderer_state.renderer) |*renderer| {
+        renderer.scrollDelta(delta);
+        log.debug("Scrolled viewport by {} rows", .{delta});
+    }
+}
+
+/// Check if viewport is at the bottom (following active area)
+/// Java signature: boolean nativeIsViewportAtBottom()
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeIsViewportAtBottom(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) c.jboolean {
+    _ = env;
+    _ = obj;
+
+    if (!renderer_state.initialized) {
+        return c.JNI_TRUE; // Default to bottom when not initialized
+    }
+
+    if (renderer_state.renderer) |*renderer| {
+        return if (renderer.isViewportAtBottom()) c.JNI_TRUE else c.JNI_FALSE;
+    }
+
+    return c.JNI_TRUE;
+}
+
+/// Get the current scroll offset from the top (0 = at top of scrollback)
+/// Java signature: int nativeGetViewportOffset()
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetViewportOffset(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) c.jint {
+    _ = env;
+    _ = obj;
+
+    if (!renderer_state.initialized) {
+        return 0;
+    }
+
+    if (renderer_state.renderer) |*renderer| {
+        const offset = renderer.getViewportOffset();
+        return @intCast(offset);
+    }
+
+    return 0;
+}
+
+/// Scroll viewport to the bottom (active area)
+/// Java signature: void nativeScrollToBottom()
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeScrollToBottom(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) void {
+    _ = env;
+    _ = obj;
+
+    if (!renderer_state.initialized) {
+        log.warn("Attempted to scroll to bottom before renderer initialized", .{});
+        return;
+    }
+
+    if (renderer_state.renderer) |*renderer| {
+        renderer.scrollToBottom();
+        log.debug("Scrolled viewport to bottom", .{});
+    }
+}
+
 // Comptime test to ensure JNI function names are correct
 comptime {
     // This will cause a compile error if the function signatures don't match
@@ -363,4 +494,11 @@ comptime {
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeDestroy;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetTerminalSize;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetFontSize;
+    // Scrolling methods
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetScrollbackRows;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetFontLineSpacing;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeScrollDelta;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeIsViewportAtBottom;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetViewportOffset;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeScrollToBottom;
 }

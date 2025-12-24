@@ -39,6 +39,14 @@ class GhosttyRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private external fun nativeSetFontSize(fontSize: Int)
     private external fun nativeProcessInput(ansiSequence: String)
 
+    // Scrolling native methods
+    private external fun nativeGetScrollbackRows(): Int
+    private external fun nativeGetFontLineSpacing(): Float
+    private external fun nativeScrollDelta(delta: Int)
+    private external fun nativeIsViewportAtBottom(): Boolean
+    private external fun nativeGetViewportOffset(): Int
+    private external fun nativeScrollToBottom()
+
     /**
      * Called when the OpenGL surface is created.
      *
@@ -180,6 +188,93 @@ class GhosttyRenderer(private val context: Context) : GLSurfaceView.Renderer {
             nativeProcessInput(ansiSequence)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeProcessInput", e)
+        }
+    }
+
+    // ============================================================================
+    // Scrolling API
+    // ============================================================================
+
+    /**
+     * Get the number of scrollback rows available.
+     *
+     * @return Number of rows above the active area that can be scrolled to
+     */
+    fun getScrollbackRows(): Int {
+        return try {
+            nativeGetScrollbackRows()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeGetScrollbackRows", e)
+            0
+        }
+    }
+
+    /**
+     * Get the font line spacing (cell height) for scroll calculations.
+     *
+     * @return Cell height in pixels
+     */
+    fun getFontLineSpacing(): Float {
+        return try {
+            nativeGetFontLineSpacing()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeGetFontLineSpacing", e)
+            20f
+        }
+    }
+
+    /**
+     * Scroll the viewport by a delta number of rows.
+     *
+     * Positive delta scrolls down (towards newer content/active area).
+     * Negative delta scrolls up (towards older content/scrollback).
+     *
+     * @param delta Number of rows to scroll (positive = down, negative = up)
+     */
+    fun scrollDelta(delta: Int) {
+        try {
+            nativeScrollDelta(delta)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeScrollDelta", e)
+        }
+    }
+
+    /**
+     * Check if viewport is at the bottom (following active area).
+     *
+     * @return true if at bottom, false if scrolled up
+     */
+    fun isViewportAtBottom(): Boolean {
+        return try {
+            nativeIsViewportAtBottom()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeIsViewportAtBottom", e)
+            true
+        }
+    }
+
+    /**
+     * Get the current scroll offset from the top.
+     *
+     * @return Offset in rows (0 = at top of scrollback)
+     */
+    fun getViewportOffset(): Int {
+        return try {
+            nativeGetViewportOffset()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeGetViewportOffset", e)
+            0
+        }
+    }
+
+    /**
+     * Scroll viewport to the bottom (active area).
+     */
+    fun scrollToBottom() {
+        try {
+            nativeScrollToBottom()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeScrollToBottom", e)
         }
     }
 }
