@@ -1,13 +1,13 @@
 # Ghostty Android - Makefile
 # Build system for cross-compiling libghostty-vt to Android targets
 
-.PHONY: help setup build-native build-android android android-studio clean clean-all check-env check-nix-shell test test-list test-feedback test-feedback-list test-feedback-id
+.PHONY: help setup build-native build-android android android-studio clean clean-all check-env check-nix-shell test test-list test-feedback test-feedback-list test-feedback-id build-aar publish-aar clean-aar
 
 # Configuration
 GHOSTTY_REPO = https://github.com/ghostty-org/ghostty.git
 GHOSTTY_DIR = libghostty-vt
 BUILD_DIR = build
-ANDROID_LIBS_DIR = android/app/src/main/jniLibs
+ANDROID_LIBS_DIR = android/terminal-library/src/main/jniLibs
 
 # Android configuration
 ANDROID_TARGET_API ?= 34
@@ -65,6 +65,11 @@ help:
 	@echo -e "  $(COLOR_BOLD)make build-android$(COLOR_RESET)  - Build the Android app (after build-native)"
 	@echo -e "  $(COLOR_BOLD)make install$(COLOR_RESET)        - Install APK to connected device"
 	@echo -e "  $(COLOR_BOLD)make logs$(COLOR_RESET)           - Show filtered adb logs for Ghostty app"
+	@echo ""
+	@echo -e "$(COLOR_GREEN)Library:$(COLOR_RESET)"
+	@echo -e "  $(COLOR_BOLD)make build-aar$(COLOR_RESET)     - Build AAR library for distribution"
+	@echo -e "  $(COLOR_BOLD)make publish-aar$(COLOR_RESET)   - Publish AAR to local maven repository"
+	@echo -e "  $(COLOR_BOLD)make clean-aar$(COLOR_RESET)     - Clean AAR build artifacts"
 	@echo ""
 	@echo -e "$(COLOR_GREEN)Testing:$(COLOR_RESET)"
 	@echo -e "  $(COLOR_BOLD)make test-feedback$(COLOR_RESET)      - Run all tests with next/prev navigation"
@@ -147,6 +152,25 @@ build-android: check-nix-shell
 	@./android/scripts/build-android.sh
 	@echo -e "$(COLOR_GREEN)✓ Android APK built$(COLOR_RESET)"
 	@echo "APK location: android/app/build/outputs/apk/debug/app-debug.apk"
+
+## build-aar: Build AAR library for distribution
+build-aar: check-nix-shell build-native
+	@echo -e "$(COLOR_BLUE)Building AAR library...$(COLOR_RESET)"
+	cd android && ./gradlew :terminal-library:assembleRelease
+	@echo -e "$(COLOR_GREEN)✓ AAR library built$(COLOR_RESET)"
+	@echo "AAR location: android/terminal-library/build/outputs/aar/terminal-library-release.aar"
+
+## publish-aar: Publish AAR to local maven repository
+publish-aar: check-nix-shell build-aar
+	@echo -e "$(COLOR_BLUE)Publishing AAR to local repository...$(COLOR_RESET)"
+	cd android && ./gradlew :terminal-library:publishReleasePublicationToLocalRepository
+	@echo -e "$(COLOR_GREEN)✓ AAR published to releases/$(COLOR_RESET)"
+
+## clean-aar: Clean AAR build artifacts
+clean-aar:
+	@echo -e "$(COLOR_BLUE)Cleaning AAR build artifacts...$(COLOR_RESET)"
+	cd android && ./gradlew :terminal-library:clean
+	@echo -e "$(COLOR_GREEN)✓ AAR clean complete$(COLOR_RESET)"
 
 ## android: Build native libraries, Android APK, install to device, and launch (one-stop command)
 android: check-nix-shell
