@@ -82,6 +82,7 @@ const RendererState = struct {
     renderer: ?Renderer = null,
     initialized: bool = false,
     surface_sized: bool = false,  // Track if surface has been sized at least once
+    initial_font_size: u32 = 0,   // Initial font size in pixels (0 = use default)
 };
 
 var renderer_state: RendererState = .{};
@@ -169,18 +170,19 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceCreat
 }
 
 /// Called when OpenGL surface size changes
-/// Java signature: void nativeOnSurfaceChanged(int width, int height, int dpi)
+/// Java signature: void nativeOnSurfaceChanged(int width, int height, int dpi, int fontSize)
 export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceChanged(
     env: *c.JNIEnv,
     obj: c.jobject,
     width: c.jint,
     height: c.jint,
     dpi: c.jint,
+    font_size: c.jint,
 ) void {
     _ = env;
     _ = obj;
 
-    log.info("nativeOnSurfaceChanged: {d}x{d} at {d} DPI", .{ width, height, dpi });
+    log.info("nativeOnSurfaceChanged: {d}x{d} at {d} DPI, font size: {d}px", .{ width, height, dpi, font_size });
 
     // Note: glViewport will be set by the renderer to match the expanded projection matrix
     // This ensures viewport and projection dimensions are in sync to avoid GL errors
@@ -188,12 +190,18 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceChang
     // Mark that surface has been sized at least once
     renderer_state.surface_sized = true;
 
+    // Store initial font size for potential re-initialization
+    const font_size_u32: u32 = if (font_size > 0) @intCast(font_size) else 0;
+    if (font_size_u32 > 0) {
+        renderer_state.initial_font_size = font_size_u32;
+    }
+
     // Initialize renderer on first surface change (now we have real dimensions!)
     if (!renderer_state.initialized) {
-        log.info("Initializing renderer with actual surface dimensions: {d}x{d} at {d} DPI", .{ width, height, dpi });
+        log.info("Initializing renderer with actual surface dimensions: {d}x{d} at {d} DPI, font size: {d}px", .{ width, height, dpi, font_size });
 
         const allocator = gpa.allocator();
-        renderer_state.renderer = Renderer.init(allocator, @intCast(width), @intCast(height), @intCast(dpi)) catch |err| {
+        renderer_state.renderer = Renderer.init(allocator, @intCast(width), @intCast(height), @intCast(dpi), renderer_state.initial_font_size) catch |err| {
             log.err("Failed to initialize renderer: {}", .{err});
             return;
         };

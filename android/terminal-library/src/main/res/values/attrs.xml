@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="GhosttyGLSurfaceView">
+        <!-- Initial font size in pixels or sp/dp dimensions -->
+        <attr name="initialFontSize" format="dimension" />
+    </declare-styleable>
+</resources>

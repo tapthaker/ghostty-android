@@ -92,9 +92,10 @@ last_frame_time: i64 = 0,
 frame_count: u32 = 0,
 current_fps: u32 = 0,
 
-/// Initialize the renderer with optional initial dimensions
-pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Self {
-    log.info("Initializing renderer with dimensions: {d}x{d}", .{ width, height });
+/// Initialize the renderer with optional initial dimensions and font size
+/// If initial_font_size_px is 0, uses the default font size
+pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16, initial_font_size_px: u32) !Self {
+    log.info("Initializing renderer with dimensions: {d}x{d}, font size: {d}px", .{ width, height, initial_font_size_px });
 
     // Load and compile bg_color shaders
     const bg_color_vertex_src = shader_module.loadShaderCode("shaders/glsl/full_screen.v.glsl");
@@ -132,20 +133,24 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16) !Se
     uniforms_buffer.bindBase(0);
 
     // Initialize dynamic font system with full UTF-8 support
-    // initDefault uses 10pt as the default size (see font_metrics.zig)
-    var font_system = try DynamicFontSystem.initDefault(allocator, dpi);
+    // Use provided font size if specified, otherwise use default
+    const font_size = if (initial_font_size_px > 0)
+        font_metrics.FontSize.fromPixels(@floatFromInt(initial_font_size_px), dpi)
+    else
+        font_metrics.FontSize.default(dpi);
+
+    var font_system = try DynamicFontSystem.init(allocator, font_size);
     errdefer font_system.deinit();
 
-    const default_size = font_metrics.FontSize.default(dpi);
-    log.info("Font system initialized with {d:.1}pt font at {d} DPI", .{ default_size.points, dpi });
+    log.info("Font system initialized with {d:.1}pt font at {d} DPI", .{ font_size.points, dpi });
 
     // Get the actual cell size from the font system
     const actual_cell_size = font_system.getCellSize();
     const cell_width = @as(u32, @intFromFloat(actual_cell_size[0]));
     const cell_height = @as(u32, @intFromFloat(actual_cell_size[1]));
 
-    const font_size_px = default_size.toPixels();
-    log.info("Font metrics: {d:.1}pt = {d:.1}px at {d} DPI", .{ default_size.points, font_size_px, dpi });
+    const font_size_px = font_size.toPixels();
+    log.info("Font metrics: {d:.1}pt = {d:.1}px at {d} DPI", .{ font_size.points, font_size_px, dpi });
     log.info("Cell dimensions: {d}x{d} pixels", .{ cell_width, cell_height });
 
     // Calculate viewport padding needed to prevent glyph clipping

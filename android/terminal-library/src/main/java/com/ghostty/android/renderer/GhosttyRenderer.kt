@@ -11,8 +11,14 @@ import javax.microedition.khronos.opengles.GL10
  *
  * This class implements the GLSurfaceView.Renderer interface and delegates
  * all rendering operations to the native Zig renderer via JNI.
+ *
+ * @param context Android context for accessing display metrics
+ * @param initialFontSize Initial font size in pixels (0 = use default)
  */
-class GhosttyRenderer(private val context: Context) : GLSurfaceView.Renderer {
+class GhosttyRenderer(
+    private val context: Context,
+    private val initialFontSize: Int = 0
+) : GLSurfaceView.Renderer {
 
     companion object {
         private const val TAG = "GhosttyRenderer"
@@ -32,7 +38,7 @@ class GhosttyRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     // Native method declarations
     private external fun nativeOnSurfaceCreated()
-    private external fun nativeOnSurfaceChanged(width: Int, height: Int, dpi: Int)
+    private external fun nativeOnSurfaceChanged(width: Int, height: Int, dpi: Int, fontSize: Int)
     private external fun nativeOnDrawFrame()
     private external fun nativeDestroy()
     private external fun nativeSetTerminalSize(cols: Int, rows: Int)
@@ -87,10 +93,10 @@ class GhosttyRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val displayMetrics = context.resources.displayMetrics
         val dpi = displayMetrics.densityDpi // This is an integer DPI value
 
-        Log.d(TAG, "onSurfaceChanged: ${width}x${height} at $dpi DPI")
+        Log.d(TAG, "onSurfaceChanged: ${width}x${height} at $dpi DPI, initial font size: $initialFontSize")
 
         try {
-            nativeOnSurfaceChanged(width, height, dpi)
+            nativeOnSurfaceChanged(width, height, dpi, initialFontSize)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeOnSurfaceChanged", e)
             throw e

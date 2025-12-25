@@ -1,6 +1,7 @@
 package com.ghostty.android.renderer
 
 import android.content.Context
+import android.content.res.TypedArray
 import android.graphics.Canvas
 import android.opengl.GLSurfaceView
 import android.util.AttributeSet
@@ -11,6 +12,7 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.widget.EdgeEffect
 import android.widget.OverScroller
+import com.ghostty.android.R
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -24,10 +26,15 @@ import kotlin.math.min
  * - Renderer thread management
  * - Surface lifecycle (pause/resume)
  * - Pinch-to-zoom for font size adjustment
+ *
+ * @param context Android context
+ * @param attrs XML attributes (optional, for XML inflation)
+ * @param initialFontSize Initial font size in pixels (optional, for programmatic construction)
  */
 class GhosttyGLSurfaceView @JvmOverloads constructor(
     context: Context,
-    attrs: AttributeSet? = null
+    attrs: AttributeSet? = null,
+    initialFontSize: Float = 0f
 ) : GLSurfaceView(context, attrs) {
 
     companion object {
@@ -140,6 +147,32 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     init {
         Log.d(TAG, "Initializing Ghostty GL Surface View")
 
+        // Parse XML attributes if present
+        val resolvedFontSize = if (attrs != null) {
+            val typedArray: TypedArray = context.obtainStyledAttributes(
+                attrs,
+                R.styleable.GhosttyGLSurfaceView
+            )
+            try {
+                // getDimension returns pixels, or default value if not specified
+                val xmlFontSize = typedArray.getDimension(
+                    R.styleable.GhosttyGLSurfaceView_initialFontSize,
+                    0f
+                )
+                // Use XML value if specified, otherwise use constructor parameter
+                if (xmlFontSize > 0f) xmlFontSize else initialFontSize
+            } finally {
+                typedArray.recycle()
+            }
+        } else {
+            // No XML attributes, use constructor parameter
+            initialFontSize
+        }
+
+        // Set current font size: use resolved value if specified, otherwise use default
+        currentFontSize = if (resolvedFontSize > 0f) resolvedFontSize else DEFAULT_FONT_SIZE
+        Log.d(TAG, "Initial font size: $currentFontSize px")
+
         // Request OpenGL ES 3.x context
         setEGLContextClientVersion(GLES_CONTEXT_CLIENT_VERSION)
 
@@ -160,8 +193,10 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         // This is needed because GLSurfaceView renders in a separate window by default
         setZOrderOnTop(true)
 
-        // Create and set the renderer (pass context for DPI access)
-        renderer = GhosttyRenderer(context)
+        // Create and set the renderer (pass context for DPI access and initial font size)
+        // Pass 0 if using default font size, otherwise pass the resolved font size as int
+        val rendererFontSize = if (resolvedFontSize > 0f) resolvedFontSize.toInt() else 0
+        renderer = GhosttyRenderer(context, rendererFontSize)
         setRenderer(renderer)
 
         // Set render mode to continuously for proof of concept
