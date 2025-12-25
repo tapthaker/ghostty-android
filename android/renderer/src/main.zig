@@ -525,6 +525,39 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetShowFps(
     }
 }
 
+/// Get the current terminal grid size (columns and rows)
+/// Java signature: int[] nativeGetGridSize()
+/// Returns [cols, rows] array
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetGridSize(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) c.jintArray {
+    _ = obj;
+
+    const env_vtable = env.*.?;
+
+    // Create a new int array of size 2
+    const result = env_vtable.*.NewIntArray.?(env, 2);
+    if (result == null) {
+        log.err("Failed to create jintArray for grid size", .{});
+        return null;
+    }
+
+    var grid_size: [2]c.jint = .{ 0, 0 };
+
+    if (!renderer_state.initialized) {
+        log.warn("Attempted to get grid size before renderer initialized", .{});
+    } else if (renderer_state.renderer) |*renderer| {
+        grid_size[0] = @intCast(renderer.grid_cols);
+        grid_size[1] = @intCast(renderer.grid_rows);
+    }
+
+    // Set the array elements
+    env_vtable.*.SetIntArrayRegion.?(env, result, 0, 2, &grid_size);
+
+    return result;
+}
+
 // Comptime test to ensure JNI function names are correct
 comptime {
     // This will cause a compile error if the function signatures don't match
@@ -545,4 +578,6 @@ comptime {
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetScrollPixelOffset;
     // FPS display
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetShowFps;
+    // Grid size
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetGridSize;
 }

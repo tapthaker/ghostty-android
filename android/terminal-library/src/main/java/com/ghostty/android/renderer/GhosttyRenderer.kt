@@ -48,6 +48,9 @@ class GhosttyRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private external fun nativeScrollToBottom()
     private external fun nativeSetScrollPixelOffset(offset: Float)
 
+    // Grid size native method - returns [cols, rows]
+    private external fun nativeGetGridSize(): IntArray
+
     // FPS display native method
     private external fun nativeSetShowFps(show: Boolean)
 
@@ -299,6 +302,27 @@ class GhosttyRenderer(private val context: Context) : GLSurfaceView.Renderer {
             nativeSetScrollPixelOffset(offset)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeSetScrollPixelOffset", e)
+        }
+    }
+
+    // ============================================================================
+    // Grid Size API
+    // ============================================================================
+
+    /**
+     * Get the current terminal grid size (columns and rows).
+     *
+     * This returns the actual grid dimensions calculated by the renderer
+     * based on the surface size and font metrics.
+     *
+     * @return IntArray of [cols, rows], or [0, 0] if not available
+     */
+    fun getGridSize(): IntArray {
+        return try {
+            nativeGetGridSize()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeGetGridSize", e)
+            intArrayOf(0, 0)
         }
     }
 
