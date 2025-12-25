@@ -28,6 +28,8 @@ ALL_TESTS = [
     "combined_attributes",
     "cursor_position",
     "cursor_movement",
+    "cursor_visibility",
+    "cursor_styles",
     "screen_clear",
     "line_operations",
     "line_wrap_basic",

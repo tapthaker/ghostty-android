@@ -49,7 +49,7 @@ make clean-all   # Clean everything
 - Two nix-shells: project (Android/Java) + Ghostty (Zig)
 - Auto-detects if not in nix-shell and shows error
 
-**Test IDs:** basic_colors_fg, basic_colors_bg, 256_colors, rgb_colors, text_attributes, combined_attributes, cursor_position, cursor_movement, screen_clear, line_operations, scrollback, line_wrap_basic, line_wrap_word_boundary, line_wrap_ansi_colors, utf8_basic, emoji, box_drawing, special_chars, double_width, combining_chars
+**Test IDs:** basic_colors_fg, basic_colors_bg, 256_colors, rgb_colors, text_attributes, combined_attributes, cursor_position, cursor_movement, cursor_visibility, cursor_styles, screen_clear, line_operations, scrollback, line_wrap_basic, line_wrap_word_boundary, line_wrap_ansi_colors, utf8_basic, emoji, box_drawing, special_chars, double_width, combining_chars
 
 **Output:**
 - Native libs: `android/app/src/main/jniLibs/<ABI>/`

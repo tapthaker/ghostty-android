@@ -169,6 +169,34 @@ object TestSuite {
             ansi(" Up 3")
             ansi("\u001B[10C")  // Move right 10 columns
             ansi("Right 10")
+        },
+
+        testCase("cursor_visibility", "Cursor show/hide (DECTCEM)") {
+            tags("cursor", "visibility", "dectcem")
+            ansi("\u001B[2J\u001B[H")  // Clear screen, home
+            ansi("Cursor Visibility Test (DECTCEM Mode 25)\n\n")
+            ansi("1. Cursor should be VISIBLE here:\n")
+            ansi("\u001B[?25h")  // Ensure cursor is visible (ESC[?25h)
+            ansi("\n")
+            ansi("2. Now hiding cursor with ESC[?25l...\n")
+            ansi("\u001B[?25l")  // Hide cursor (ESC[?25l)
+            ansi("   Cursor should be HIDDEN now.\n\n")
+            ansi("3. Restoring cursor with ESC[?25h...\n")
+            ansi("\u001B[?25h")  // Show cursor again (ESC[?25h)
+            ansi("   Cursor should be VISIBLE again:")
+        },
+
+        testCase("cursor_styles", "Cursor shapes (DECSCUSR)") {
+            tags("cursor", "style", "decscusr")
+            ansi("\u001B[2J\u001B[H")  // Clear screen, home
+            ansi("Cursor Style Test (DECSCUSR)\n\n")
+            ansi("Current style: UNDERLINE (ESC[4 q)\n\n")
+            ansi("Try these sequences to change cursor style:\n")
+            ansi("  ESC[1 q or ESC[2 q - Block\n")
+            ansi("  ESC[3 q or ESC[4 q - Underline\n")
+            ansi("  ESC[5 q or ESC[6 q - Bar\n\n")
+            ansi("Cursor is here -->")
+            ansi("\u001B[4 q")  // Set underline style to demonstrate
         }
     )
 

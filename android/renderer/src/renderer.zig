@@ -907,10 +907,56 @@ pub fn syncFromTerminal(self: *Self) !void {
         }
     }
 
+    // Get cursor state from terminal
+    const terminal = self.terminal_manager.getTerminal();
+    const screen = terminal.screens.get(.primary).?;
+    const cursor = screen.cursor;
+    const cursor_visible = terminal.modes.get(.cursor_visible);
+
+    // Add cursor glyph if visible
+    if (cursor_visible) {
+        // Update cursor position in uniforms
+        self.uniforms.cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(
+            @intCast(cursor.x),
+            @intCast(cursor.y),
+        );
+
+        // Choose cursor character based on style
+        const cursor_style = cursor.cursor_style;
+        const cursor_char: u21 = switch (cursor_style) {
+            .block => 0x2588, // █ Full block
+            .bar => 0x258F, // ▏ Left one-eighth block (thin vertical bar)
+            .underline => 0x2581, // ▁ Lower one-eighth block (thin underline)
+            .block_hollow => 0x25A1, // □ White square (hollow block)
+        };
+
+        // Add cursor glyph at the cursor position
+        const cursor_color = [4]u8{ 255, 255, 255, 255 }; // White cursor
+        var cursor_glyph = (&self.font_system).makeCellText(
+            cursor_char,
+            @intCast(cursor.x),
+            @intCast(cursor.y),
+            cursor_color,
+            .{}, // No special attributes
+            1, // Single width
+        );
+        cursor_glyph.bools.is_cursor_glyph = true;
+        try text_glyphs.append(self.allocator, cursor_glyph);
+
+        log.info("Cursor visible at ({}, {}), style={s} - added cursor glyph", .{ cursor.x, cursor.y, @tagName(cursor_style) });
+    } else {
+        // Hide cursor by setting position off-screen
+        self.uniforms.cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(255, 255);
+        log.info("Cursor hidden", .{});
+    }
+
     // Upload to GPU
     try self.cells_bg_buffer.sync(cell_bg_colors);
     try self.glyphs_buffer.sync(text_glyphs.items);
     self.num_test_glyphs = @intCast(text_glyphs.items.len);
+
+    // Sync uniforms to GPU (includes cursor position update)
+    try self.syncUniforms();
 
     log.info("Synced {} glyphs to GPU from terminal", .{self.num_test_glyphs});
 }
