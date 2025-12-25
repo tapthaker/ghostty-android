@@ -62,7 +62,8 @@ pub const Uniforms = extern struct {
 
     /// Visual scroll pixel offset for smooth sub-row scrolling.
     /// This is the Y offset in pixels to apply to all rendered content
-    /// for smooth scrolling between row boundaries.
+    /// for smooth scrolling between row boundaries. Can also be used for
+    /// larger offsets like keyboard area.
     scroll_pixel_offset: f32 align(4) = 0.0,
 
     pub const Bools = packed struct(u32) {

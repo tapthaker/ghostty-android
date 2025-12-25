@@ -10,12 +10,32 @@ import android.view.Choreographer
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
+import android.view.animation.DecelerateInterpolator
 import android.widget.EdgeEffect
 import android.widget.OverScroller
 import com.ghostty.android.R
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+
+/**
+ * Listener for bottom offset changes to drive keyboard visibility.
+ * Called when the internal bottom offset changes due to scroll gestures or animation.
+ */
+interface BottomOffsetListener {
+    /**
+     * Called during drag/animation with current offset progress.
+     * @param offset Current offset in pixels (0 to maxOffset)
+     * @param maxOffset Maximum offset (keyboard height)
+     */
+    fun onBottomOffsetChanged(offset: Float, maxOffset: Float)
+
+    /**
+     * Called when offset state changes (expanded/collapsed).
+     * @param expanded true if keyboard area should be shown
+     */
+    fun onBottomOffsetStateChanged(expanded: Boolean)
+}
 
 /**
  * OpenGL ES surface view for Ghostty terminal rendering.
@@ -48,6 +68,9 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         private const val MIN_FONT_SIZE = 8f
         private const val MAX_FONT_SIZE = 96f
         private const val DEFAULT_FONT_SIZE = 20f  // More reasonable default
+
+        // Bottom offset animation
+        private const val SNAP_ANIMATION_DURATION_MS = 250L
     }
 
     private val renderer: GhosttyRenderer
@@ -64,6 +87,19 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     // Last row position used by OverScroller (for tracking delta during fling)
     private var lastScrollerRow = 0
 
+    // Bottom offset for keyboard area
+    private var bottomOffsetListener: BottomOffsetListener? = null
+    private var maxBottomOffset = 0f              // Configurable max offset (keyboard height)
+    private var bottomOffset = 0f                 // Current animated offset (0 to maxBottomOffset)
+    private var bottomOffsetDragStart = 0f        // Offset when drag gesture started
+    private var accumulatedBottomDrag = 0f        // Accumulated drag distance for bottom offset
+    private var isBottomOffsetAnimating = false
+    private var bottomOffsetAnimationStartTime = 0L
+    private var bottomOffsetAnimationStartValue = 0f
+    private var bottomOffsetAnimationTargetValue = 0f
+    private val bottomOffsetInterpolator = DecelerateInterpolator()
+    private var lastBottomOffsetExpanded = false  // Track last state for callback
+
     // Choreographer for driving fling animation at vsync
     private val choreographer = Choreographer.getInstance()
     private var isAnimating = false
@@ -78,9 +114,12 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 isAnimating = false
                 scrollPixelOffset = 0f
                 lastScrollerRow = 0
-                queueEvent {
-                    renderer.setScrollPixelOffset(0f)
-                    requestRender()
+                // Only reset if no active bottom offset
+                if (bottomOffset == 0f) {
+                    queueEvent {
+                        renderer.setScrollPixelOffset(0f)
+                        requestRender()
+                    }
                 }
                 return
             }
@@ -89,9 +128,12 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 // Animation finished - reset pixel offset to clean state
                 isAnimating = false
                 scrollPixelOffset = 0f
-                queueEvent {
-                    renderer.setScrollPixelOffset(0f)
-                    requestRender()
+                // Only reset if no active bottom offset
+                if (bottomOffset == 0f) {
+                    queueEvent {
+                        renderer.setScrollPixelOffset(0f)
+                        requestRender()
+                    }
                 }
                 return
             }
@@ -141,6 +183,45 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
             // Continue animation on next vsync
             choreographer.postFrameCallback(this)
+        }
+    }
+
+    // Frame callback for bottom offset snap animation
+    private val bottomOffsetAnimationCallback = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!isBottomOffsetAnimating) return
+
+            val elapsed = System.currentTimeMillis() - bottomOffsetAnimationStartTime
+            val progress = (elapsed.toFloat() / SNAP_ANIMATION_DURATION_MS).coerceIn(0f, 1f)
+            val interpolatedProgress = bottomOffsetInterpolator.getInterpolation(progress)
+
+            bottomOffset = bottomOffsetAnimationStartValue +
+                (bottomOffsetAnimationTargetValue - bottomOffsetAnimationStartValue) * interpolatedProgress
+
+            // Apply offset via renderer
+            queueEvent {
+                renderer.setScrollPixelOffset(bottomOffset)
+                requestRender()
+            }
+
+            // Notify listener of offset change
+            bottomOffsetListener?.onBottomOffsetChanged(bottomOffset, maxBottomOffset)
+
+            if (progress >= 1f) {
+                // Animation complete
+                isBottomOffsetAnimating = false
+                bottomOffset = bottomOffsetAnimationTargetValue
+
+                // Notify state change if it changed
+                val isExpanded = bottomOffset >= maxBottomOffset
+                if (isExpanded != lastBottomOffsetExpanded) {
+                    lastBottomOffsetExpanded = isExpanded
+                    bottomOffsetListener?.onBottomOffsetStateChanged(isExpanded)
+                }
+            } else {
+                // Continue animation
+                choreographer.postFrameCallback(this)
+            }
         }
     }
 
@@ -275,11 +356,20 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                     choreographer.removeFrameCallback(scrollAnimationCallback)
                     isAnimating = false
                 }
+                // Abort any ongoing bottom offset animation
+                if (isBottomOffsetAnimating) {
+                    choreographer.removeFrameCallback(bottomOffsetAnimationCallback)
+                    isBottomOffsetAnimating = false
+                }
                 // Reset visual pixel offset when touch begins
                 scrollPixelOffset = 0f
                 lastScrollerRow = renderer.getViewportOffset()
+                // Reset bottom offset drag tracking
+                bottomOffsetDragStart = bottomOffset
+                accumulatedBottomDrag = bottomOffset  // Start from current offset
+                // Preserve bottom offset if active, otherwise reset to 0
                 queueEvent {
-                    renderer.setScrollPixelOffset(0f)
+                    renderer.setScrollPixelOffset(bottomOffset)
                 }
                 return true
             }
@@ -310,14 +400,33 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 // Calculate how many full rows to scroll
                 var rowsDelta = 0
 
+                // Handle bottom offset mode (for keyboard area)
+                // Enter this mode when: at bottom and swiping up, OR already have offset
+                if (maxBottomOffset > 0 && (bottomOffset > 0 || (isAtBottom && distanceY > 0))) {
+                    accumulatedBottomDrag += distanceY
+                    val newOffset = accumulatedBottomDrag.coerceIn(0f, maxBottomOffset)
+                    if (newOffset != bottomOffset) {
+                        bottomOffset = newOffset
+                        queueEvent {
+                            renderer.setScrollPixelOffset(bottomOffset)
+                            requestRender()
+                        }
+                        bottomOffsetListener?.onBottomOffsetChanged(bottomOffset, maxBottomOffset)
+                    }
+                    // Reset scrollPixelOffset so normal scrolling starts fresh when we exit
+                    scrollPixelOffset = 0f
+                    return true
+                }
+
                 // distanceY > 0 = finger moved UP = scroll DOWN (towards active area)
                 // scrollPixelOffset accumulates positive values, crossing row boundaries
                 if (isAtBottom && scrollPixelOffset > 0) {
-                    // At bottom, can't scroll down - clamp offset and trigger edge effect
+                    // At bottom, can't scroll down - show edge effect
                     edgeEffectBottom.onPull(abs(distanceY) / height)
                     edgeEffectBottom.setSize(width, height)
                     scrollPixelOffset = 0f
                 } else {
+                    // Normal scroll - handle row crossings
                     while (scrollPixelOffset >= fontLineSpacing) {
                         scrollPixelOffset -= fontLineSpacing
                         rowsDelta += 1  // Scroll down (towards active area)
@@ -361,6 +470,11 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
             ): Boolean {
                 // Don't fling if we're in a scale gesture
                 if (scaleGestureDetector.isInProgress) {
+                    return false
+                }
+
+                // Don't fling if we're in bottom offset mode - let the snap animation handle it
+                if (bottomOffset > 0 || (maxBottomOffset > 0 && renderer.isViewportAtBottom() && velocityY < 0)) {
                     return false
                 }
 
@@ -550,9 +664,17 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
             false
         }
 
-        // Handle edge effect release on ACTION_UP or ACTION_CANCEL
+        // Handle edge effect release and bottom offset snap on ACTION_UP or ACTION_CANCEL
         when (event.action) {
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                // Handle bottom offset snap animation
+                if (maxBottomOffset > 0 && (bottomOffset > 0 || accumulatedBottomDrag != 0f)) {
+                    // Snap to nearest: if past 50%, expand; otherwise collapse
+                    val target = if (bottomOffset > maxBottomOffset / 2) maxBottomOffset else 0f
+                    animateBottomOffsetTo(target)
+                    accumulatedBottomDrag = 0f
+                }
+
                 edgeEffectTop.onRelease()
                 edgeEffectBottom.onRelease()
                 if (!edgeEffectTop.isFinished || !edgeEffectBottom.isFinished) {
@@ -587,4 +709,57 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 requestRender()
             }
         }
+
+    /**
+     * Set the maximum bottom offset (keyboard height).
+     *
+     * When set to a positive value, the user can swipe up at the bottom
+     * of the terminal to reveal this offset area for the keyboard.
+     *
+     * @param height Maximum offset in pixels (typically keyboard height)
+     */
+    fun setMaxBottomOffset(height: Float) {
+        this.maxBottomOffset = height.coerceAtLeast(0f)
+    }
+
+    /**
+     * Set the listener for bottom offset changes.
+     *
+     * The listener is called during drag gestures and snap animations
+     * to report the current offset, and when the expanded/collapsed state changes.
+     */
+    fun setBottomOffsetListener(listener: BottomOffsetListener?) {
+        this.bottomOffsetListener = listener
+    }
+
+    /**
+     * Get the current bottom offset value.
+     *
+     * @return Current offset in pixels (0 to maxBottomOffset)
+     */
+    fun getBottomOffset(): Float = bottomOffset
+
+    /**
+     * Check if the bottom offset is fully expanded.
+     *
+     * @return true if offset equals maxBottomOffset and maxBottomOffset > 0
+     */
+    fun isBottomOffsetExpanded(): Boolean = maxBottomOffset > 0 && bottomOffset >= maxBottomOffset
+
+    /**
+     * Animate the bottom offset to a target value.
+     * Used internally for snap animations after gesture end.
+     */
+    private fun animateBottomOffsetTo(target: Float) {
+        if (isBottomOffsetAnimating) {
+            choreographer.removeFrameCallback(bottomOffsetAnimationCallback)
+        }
+
+        bottomOffsetAnimationStartTime = System.currentTimeMillis()
+        bottomOffsetAnimationStartValue = bottomOffset
+        bottomOffsetAnimationTargetValue = target.coerceIn(0f, maxBottomOffset)
+        isBottomOffsetAnimating = true
+
+        choreographer.postFrameCallback(bottomOffsetAnimationCallback)
+    }
 }
