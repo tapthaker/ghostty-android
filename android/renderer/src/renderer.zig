@@ -918,37 +918,52 @@ pub fn syncFromTerminal(self: *Self) !void {
     const cursor = screen.cursor;
     const cursor_visible = terminal.modes.get(.cursor_visible);
 
-    // Add cursor glyph if visible
+    // Convert cursor position from active area to viewport coordinates.
+    // The cursor's page_pin tracks its position in the page list, and we need
+    // to convert that to viewport-relative coordinates for rendering.
+    // This returns null if the cursor is outside the visible viewport (e.g., scrolled off-screen).
+    const cursor_viewport_point = screen.pages.pointFromPin(.viewport, screen.cursor.page_pin.*);
+
+    // Add cursor glyph if visible and within viewport
     if (cursor_visible) {
-        // Update cursor position in uniforms
-        self.uniforms.cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(
-            @intCast(cursor.x),
-            @intCast(cursor.y),
-        );
+        if (cursor_viewport_point) |vp| {
+            // Cursor is visible in viewport - use viewport coordinates
+            const viewport_x: u16 = @intCast(vp.viewport.x);
+            const viewport_y: u16 = @intCast(vp.viewport.y);
 
-        // Choose cursor character based on style
-        const cursor_style = cursor.cursor_style;
-        const cursor_char: u21 = switch (cursor_style) {
-            .block => 0x2588, // █ Full block
-            .bar => 0x258F, // ▏ Left one-eighth block (thin vertical bar)
-            .underline => 0x2581, // ▁ Lower one-eighth block (thin underline)
-            .block_hollow => 0x25A1, // □ White square (hollow block)
-        };
+            // Update cursor position in uniforms
+            self.uniforms.cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(viewport_x, viewport_y);
 
-        // Add cursor glyph at the cursor position
-        const cursor_color = [4]u8{ 255, 255, 255, 255 }; // White cursor
-        var cursor_glyph = (&self.font_system).makeCellText(
-            cursor_char,
-            @intCast(cursor.x),
-            @intCast(cursor.y),
-            cursor_color,
-            .{}, // No special attributes
-            1, // Single width
-        );
-        cursor_glyph.bools.is_cursor_glyph = true;
-        try text_glyphs.append(self.allocator, cursor_glyph);
+            // Choose cursor character based on style
+            const cursor_style = cursor.cursor_style;
+            const cursor_char: u21 = switch (cursor_style) {
+                .block => 0x2588, // █ Full block
+                .bar => 0x258F, // ▏ Left one-eighth block (thin vertical bar)
+                .underline => 0x2581, // ▁ Lower one-eighth block (thin underline)
+                .block_hollow => 0x25A1, // □ White square (hollow block)
+            };
 
-        log.info("Cursor visible at ({}, {}), style={s} - added cursor glyph", .{ cursor.x, cursor.y, @tagName(cursor_style) });
+            // Add cursor glyph at the viewport position
+            const cursor_color = [4]u8{ 255, 255, 255, 255 }; // White cursor
+            var cursor_glyph = (&self.font_system).makeCellText(
+                cursor_char,
+                viewport_x,
+                viewport_y,
+                cursor_color,
+                .{}, // No special attributes
+                1, // Single width
+            );
+            cursor_glyph.bools.is_cursor_glyph = true;
+            try text_glyphs.append(self.allocator, cursor_glyph);
+
+            log.info("Cursor visible at viewport ({}, {}), active ({}, {}), style={s}", .{
+                viewport_x, viewport_y, cursor.x, cursor.y, @tagName(cursor_style),
+            });
+        } else {
+            // Cursor is outside viewport (scrolled off-screen)
+            self.uniforms.cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(255, 255);
+            log.info("Cursor outside viewport (active pos: {}, {})", .{ cursor.x, cursor.y });
+        }
     } else {
         // Hide cursor by setting position off-screen
         self.uniforms.cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(255, 255);
