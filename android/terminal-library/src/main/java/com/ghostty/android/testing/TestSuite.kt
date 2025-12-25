@@ -324,6 +324,25 @@ object TestSuite {
             ansi("ñ (n + ~)\n")
             ansi("ö (o + ¨)\n")
             ansi("å (a + ˚)\n")
+        },
+
+        testCase("prompt_symbols", "Prompt/UI symbols") {
+            tags("charset", "symbols", "ui")
+            ansi("\u001B[2J\u001B[H")
+            ansi("Prompt/UI Symbols Test:\n\n")
+            ansi("Return symbol: ↵\n")
+            ansi("Forward slash: /\n")
+            ansi("Play triangles: ⏵⏵\n")
+            ansi("Combined prompt: ⏵⏵ user@host / ~/code ↵\n")
+            ansi("\n")
+            ansi("Additional arrows:\n")
+            ansi("→ ← ↑ ↓ ↵ ↲ ⏎\n")
+            ansi("\n")
+            ansi("Additional triangles:\n")
+            ansi("▶ ▷ ◀ ◁ ⏵ ⏴\n")
+            ansi("\n")
+            ansi("Common prompt chars:\n")
+            ansi("$ % # > » › ❯ ➜\n")
         }
     )
 

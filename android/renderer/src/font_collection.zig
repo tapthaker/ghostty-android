@@ -118,6 +118,8 @@ pub const FontCollection = struct {
 
         const noto_cjk = system_path ++ "NotoSansCJK-Regular.ttc";
         const noto_emoji = system_path ++ "NotoColorEmoji.ttf";
+        const noto_symbols = system_path ++ "NotoSansSymbols-Regular-Subsetted.ttf";
+        const noto_symbols2 = system_path ++ "NotoSansSymbols-Regular-Subsetted2.ttf";
         const droid_sans = system_path ++ "DroidSans.ttf";
         const droid_sans_bold = system_path ++ "DroidSans-Bold.ttf";
     };
@@ -132,7 +134,7 @@ pub const FontCollection = struct {
             .primary = .{},
             // Pre-allocate capacity for fallback fonts to prevent reallocation
             // which would invalidate cached pointers in CodepointResolver
-            .fallbacks = try std.ArrayList(FontFamily).initCapacity(allocator, 4),
+            .fallbacks = try std.ArrayList(FontFamily).initCapacity(allocator, 8),
             .font_size = font_size,
         };
 
@@ -264,6 +266,24 @@ pub const FontCollection = struct {
             log.info("Loaded Roboto Mono as fallback", .{});
         }
 
+        // Try to load symbols fonts for arrows, triangles, and other UI symbols
+        if (self.tryLoadSingleFont(AndroidFonts.noto_symbols, .symbols)) |family| {
+            try self.fallbacks.append(self.allocator, family);
+            log.info("Loaded Noto Symbols as fallback", .{});
+        }
+        if (self.tryLoadSingleFont(AndroidFonts.noto_symbols2, .symbols)) |family| {
+            try self.fallbacks.append(self.allocator, family);
+            log.info("Loaded Noto Symbols 2 as fallback", .{});
+        }
+
+        // Load embedded Noto Sans Symbols 2 for media control characters (U+23F4-23F5, U+23CE, etc.)
+        if (self.loadEmbeddedSymbols2Font()) |family| {
+            try self.fallbacks.append(self.allocator, family);
+            log.info("Loaded embedded Noto Symbols 2 as fallback", .{});
+        } else |err| {
+            log.warn("Failed to load embedded Noto Symbols 2: {}", .{err});
+        }
+
         // Try to load CJK font for Asian scripts
         if (self.tryLoadSingleFont(AndroidFonts.noto_cjk, .cjk)) |family| {
             try self.fallbacks.append(self.allocator, family);
@@ -324,6 +344,40 @@ pub const FontCollection = struct {
             .face = face,
             .source = .{ .embedded = embedded_fonts.twemoji_colr },
             .coverage_hint = .emoji,
+        };
+
+        return FontFamily{
+            .regular = font_face,
+            .bold = null,
+            .italic = null,
+            .bold_italic = null,
+        };
+    }
+
+    /// Load the embedded Noto Sans Symbols 2 font for media control characters
+    fn loadEmbeddedSymbols2Font(self: *FontCollection) !FontFamily {
+        var face = try self.library.initMemoryFace(embedded_fonts.noto_sans_symbols2, 0);
+        errdefer face.deinit();
+
+        // Verify the face handle is valid
+        if (@intFromPtr(face.handle) == 0) {
+            face.deinit();
+            return error.InvalidFontFace;
+        }
+
+        // Set font size
+        const font_size_px = self.font_size.toPixels();
+        const size_pixels = @as(u32, @intFromFloat(@round(font_size_px)));
+        const dpi = self.font_size.dpi;
+        const char_size = @as(i32, @intCast(size_pixels)) * 64;
+        try face.setCharSize(char_size, char_size, dpi, dpi);
+
+        log.info("Loaded embedded Noto Sans Symbols 2 font", .{});
+
+        const font_face = FontFace{
+            .face = face,
+            .source = .{ .embedded = embedded_fonts.noto_sans_symbols2 },
+            .coverage_hint = .symbols,
         };
 
         return FontFamily{

@@ -41,7 +41,8 @@ ALL_TESTS = [
     "box_drawing",
     "special_chars",
     "double_width",
-    "combining_chars"
+    "combining_chars",
+    "prompt_symbols"
 ]
 
 
