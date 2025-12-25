@@ -340,14 +340,33 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeProcessInput(
     }
 
     if (renderer_state.renderer) |*renderer| {
-        // Convert JNI string to Zig string
-        var buffer: [8192]u8 = undefined;
-        const input_data = jni.getJString(env, ansiSequence, &buffer) catch |err| {
+        // Get the string length first to allocate appropriate buffer
+        const env_vtable = env.*.?;
+        const str_len = env_vtable.*.GetStringUTFLength.?(env, ansiSequence);
+        if (str_len <= 0) {
+            log.warn("Empty or invalid input string", .{});
+            return;
+        }
+
+        const len: usize = @intCast(str_len);
+        log.info("Processing {} bytes of ANSI input", .{len});
+
+        // Dynamically allocate buffer (round up to 512KB chunks)
+        const chunk_size: usize = 512 * 1024;
+        const alloc_size = ((len + chunk_size - 1) / chunk_size) * chunk_size;
+        const allocator = gpa.allocator();
+
+        const buffer = allocator.alloc(u8, alloc_size) catch |err| {
+            log.err("Failed to allocate buffer of {} bytes: {}", .{ alloc_size, err });
+            return;
+        };
+        defer allocator.free(buffer);
+
+        // Convert JNI string to Zig string using dynamically allocated buffer
+        const input_data = jni.getJString(env, ansiSequence, buffer) catch |err| {
             log.err("Failed to get JNI string: {}", .{err});
             return;
         };
-
-        log.debug("Processing {} bytes of ANSI input", .{input_data.len});
 
         // Feed the input to the terminal manager
         renderer.terminal_manager.processInput(input_data) catch |err| {
@@ -355,7 +374,7 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeProcessInput(
             return;
         };
 
-        log.debug("Input processed successfully", .{});
+        log.info("Input processed successfully: {} bytes", .{input_data.len});
     } else {
         log.warn("Renderer not initialized", .{});
     }
