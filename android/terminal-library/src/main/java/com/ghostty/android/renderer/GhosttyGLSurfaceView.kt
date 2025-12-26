@@ -19,12 +19,25 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Listener for bottom offset changes to drive keyboard visibility.
- * Called when the internal bottom offset changes due to scroll gestures or animation.
+ * Unified listener for terminal events.
+ * Handles surface lifecycle, keyboard gestures, and other terminal events.
  */
-interface BottomOffsetListener {
+interface TerminalEventListener {
+    /**
+     * Called when terminal surface is ready with valid grid size.
+     * Fires after initial creation and after every resize (orientation change, etc.).
+     *
+     * Expected response: clear terminal, send resize to remote, fetch fresh content.
+     *
+     * @param cols Terminal columns
+     * @param rows Terminal rows
+     */
+    fun onSurfaceReady(cols: Int, rows: Int)
+
     /**
      * Called during drag/animation with current offset progress.
+     * Used to drive keyboard visibility animation.
+     *
      * @param offset Current offset in pixels (0 to maxOffset)
      * @param maxOffset Maximum offset (keyboard height)
      */
@@ -32,6 +45,8 @@ interface BottomOffsetListener {
 
     /**
      * Called when offset state changes (expanded/collapsed).
+     * Used to finalize keyboard visibility animation.
+     *
      * @param expanded true if keyboard area should be shown
      */
     fun onBottomOffsetStateChanged(expanded: Boolean)
@@ -87,8 +102,8 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     // Last row position used by OverScroller (for tracking delta during fling)
     private var lastScrollerRow = 0
 
-    // Bottom offset for keyboard area
-    private var bottomOffsetListener: BottomOffsetListener? = null
+    // Terminal event listener
+    private var eventListener: TerminalEventListener? = null
     private var maxBottomOffset = 0f              // Configurable max offset (keyboard height)
     private var bottomOffset = 0f                 // Current animated offset (0 to maxBottomOffset)
     private var bottomOffsetDragStart = 0f        // Offset when drag gesture started
@@ -205,7 +220,7 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
             }
 
             // Notify listener of offset change
-            bottomOffsetListener?.onBottomOffsetChanged(bottomOffset, maxBottomOffset)
+            eventListener?.onBottomOffsetChanged(bottomOffset, maxBottomOffset)
 
             if (progress >= 1f) {
                 // Animation complete
@@ -216,7 +231,7 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 val isExpanded = bottomOffset >= maxBottomOffset
                 if (isExpanded != lastBottomOffsetExpanded) {
                     lastBottomOffsetExpanded = isExpanded
-                    bottomOffsetListener?.onBottomOffsetStateChanged(isExpanded)
+                    eventListener?.onBottomOffsetStateChanged(isExpanded)
                 }
             } else {
                 // Continue animation
@@ -279,6 +294,14 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         val rendererFontSize = if (resolvedFontSize > 0f) resolvedFontSize.toInt() else 0
         renderer = GhosttyRenderer(context, rendererFontSize)
         setRenderer(renderer)
+
+        // Set up surface change callback to notify listener on main thread
+        renderer.setOnSurfaceChangedCallback { cols, rows ->
+            // Post to main thread since we're on GL thread
+            post {
+                eventListener?.onSurfaceReady(cols, rows)
+            }
+        }
 
         // Set render mode to continuously for proof of concept
         // TODO: Change to RENDERMODE_WHEN_DIRTY once we have proper terminal update callbacks
@@ -411,7 +434,7 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                             renderer.setScrollPixelOffset(bottomOffset)
                             requestRender()
                         }
-                        bottomOffsetListener?.onBottomOffsetChanged(bottomOffset, maxBottomOffset)
+                        eventListener?.onBottomOffsetChanged(bottomOffset, maxBottomOffset)
                     }
                     // Reset scrollPixelOffset so normal scrolling starts fresh when we exit
                     scrollPixelOffset = 0f
@@ -723,13 +746,15 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     }
 
     /**
-     * Set the listener for bottom offset changes.
+     * Set the listener for terminal events.
      *
-     * The listener is called during drag gestures and snap animations
-     * to report the current offset, and when the expanded/collapsed state changes.
+     * The listener receives:
+     * - onSurfaceReady: when terminal surface is ready or resized
+     * - onBottomOffsetChanged: during keyboard gesture drag/animation
+     * - onBottomOffsetStateChanged: when keyboard gesture state changes
      */
-    fun setBottomOffsetListener(listener: BottomOffsetListener?) {
-        this.bottomOffsetListener = listener
+    fun setEventListener(listener: TerminalEventListener?) {
+        this.eventListener = listener
     }
 
     /**

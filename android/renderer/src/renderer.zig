@@ -956,18 +956,13 @@ pub fn syncFromTerminal(self: *Self) !void {
             cursor_glyph.bools.is_cursor_glyph = true;
             try text_glyphs.append(self.allocator, cursor_glyph);
 
-            log.info("Cursor visible at viewport ({}, {}), active ({}, {}), style={s}", .{
-                viewport_x, viewport_y, cursor.x, cursor.y, @tagName(cursor_style),
-            });
         } else {
             // Cursor is outside viewport (scrolled off-screen)
             self.uniforms.cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(255, 255);
-            log.info("Cursor outside viewport (active pos: {}, {})", .{ cursor.x, cursor.y });
         }
     } else {
         // Hide cursor by setting position off-screen
         self.uniforms.cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(255, 255);
-        log.info("Cursor hidden", .{});
     }
 
     // Upload to GPU

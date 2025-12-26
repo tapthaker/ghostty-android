@@ -60,6 +60,17 @@ class GhosttyRenderer(
     // FPS display native method
     private external fun nativeSetShowFps(show: Boolean)
 
+    // Callback invoked after surface changes with new grid size
+    private var onSurfaceChangedCallback: ((cols: Int, rows: Int) -> Unit)? = null
+
+    /**
+     * Set callback to be invoked after onSurfaceChanged completes.
+     * Called with the new grid dimensions on the GL thread.
+     */
+    fun setOnSurfaceChangedCallback(callback: ((cols: Int, rows: Int) -> Unit)?) {
+        this.onSurfaceChangedCallback = callback
+    }
+
     /**
      * Called when the OpenGL surface is created.
      *
@@ -97,6 +108,15 @@ class GhosttyRenderer(
 
         try {
             nativeOnSurfaceChanged(width, height, dpi, initialFontSize)
+
+            // Get grid size and notify callback
+            val gridSize = getGridSize()
+            val cols = gridSize[0]
+            val rows = gridSize[1]
+            if (cols > 0 && rows > 0) {
+                Log.d(TAG, "Surface ready with grid size: ${cols}x${rows}")
+                onSurfaceChangedCallback?.invoke(cols, rows)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeOnSurfaceChanged", e)
             throw e
