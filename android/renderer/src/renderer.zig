@@ -926,16 +926,14 @@ pub fn syncFromTerminal(self: *Self) !void {
         .preedit = self.preedit_active,
     });
 
-    // Get screen for viewport conversion
-    const terminal = self.terminal_manager.getTerminal();
-    const screen = terminal.screens.get(.primary).?;
-    const cursor_viewport_point = screen.pages.pointFromPin(.viewport, screen.cursor.page_pin.*);
+    // Get cursor viewport position from render state
+    const cursor_viewport = self.terminal_manager.getCursorViewport();
 
     // Render cursor if style is not null (cursor should be visible)
     if (cursor_style_opt) |cursor_style| {
-        if (cursor_viewport_point) |vp| {
-            const viewport_x: u16 = @intCast(vp.viewport.x);
-            const viewport_y: u16 = @intCast(vp.viewport.y);
+        if (cursor_viewport) |vp| {
+            const viewport_x: u16 = vp.x;
+            const viewport_y: u16 = vp.y;
 
             // Update cursor position in uniforms
             self.uniforms.cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(viewport_x, viewport_y);

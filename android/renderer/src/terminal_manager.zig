@@ -16,6 +16,7 @@ pub const TerminalManager = @This();
 
 allocator: Allocator,
 terminal: ghostty_vt.Terminal,
+render_state: ghostty_vt.RenderState = .empty,
 
 /// Initialize a new terminal with the specified size
 pub fn init(allocator: Allocator, cols: u16, rows: u16) !TerminalManager {
@@ -47,6 +48,7 @@ pub fn init(allocator: Allocator, cols: u16, rows: u16) !TerminalManager {
 /// Clean up terminal resources
 pub fn deinit(self: *TerminalManager) void {
     log.info("Deinitializing terminal", .{});
+    self.render_state.deinit(self.allocator);
     self.terminal.deinit(self.allocator);
 }
 
@@ -148,3 +150,34 @@ pub fn scrollToBottom(self: *TerminalManager) void {
     screen.pages.scroll(.active);
     log.debug("Scrolled viewport to bottom (active area)", .{});
 }
+
+/// Update render state from terminal - call before extracting cursor style
+pub fn updateRenderState(self: *TerminalManager) !void {
+    try self.render_state.update(self.allocator, &self.terminal);
+}
+
+/// Get cursor style for rendering using the proper helper
+/// Returns null if cursor should be hidden (visibility disabled, blink off, etc.)
+pub fn getCursorStyle(
+    self: *const TerminalManager,
+    opts: ghostty_vt.RendererCursorStyleOptions,
+) ?ghostty_vt.RendererCursorStyle {
+    return ghostty_vt.rendererCursorStyle(&self.render_state, opts);
+}
+
+/// Get cursor viewport position from render state
+/// Returns null if cursor is not visible in the current viewport (e.g., scrolled off)
+pub fn getCursorViewport(self: *const TerminalManager) ?CursorViewport {
+    const vp = self.render_state.cursor.viewport orelse return null;
+    return .{
+        .x = vp.x,
+        .y = vp.y,
+        .wide_tail = vp.wide_tail,
+    };
+}
+
+pub const CursorViewport = struct {
+    x: u16,
+    y: u16,
+    wide_tail: bool,
+};
