@@ -50,6 +50,26 @@ interface TerminalEventListener {
      * @param expanded true if keyboard area should be shown
      */
     fun onBottomOffsetStateChanged(expanded: Boolean)
+
+    /**
+     * Called when user performs a two-finger swipe up gesture.
+     */
+    fun onTwoFingerSwipeUp() {}
+
+    /**
+     * Called when user performs a two-finger swipe down gesture.
+     */
+    fun onTwoFingerSwipeDown() {}
+
+    /**
+     * Called when user performs a two-finger double-tap gesture.
+     */
+    fun onTwoFingerDoubleTap() {}
+
+    /**
+     * Called when user performs a single-finger double-tap gesture.
+     */
+    fun onDoubleTap() {}
 }
 
 /**
@@ -86,6 +106,19 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
         // Bottom offset animation
         private const val SNAP_ANIMATION_DURATION_MS = 250L
+
+        // Two-finger swipe thresholds
+        private const val TWO_FINGER_SWIPE_THRESHOLD_DP = 50f
+        private const val TWO_FINGER_SWIPE_MAX_TIME_MS = 500L
+        private const val TWO_FINGER_DIRECTION_RATIO = 2.0f
+
+        // Two-finger double-tap thresholds
+        private const val TWO_FINGER_TAP_MAX_DISTANCE_DP = 20f
+        private const val TWO_FINGER_TAP_MAX_TIME_MS = 200L
+        private const val TWO_FINGER_DOUBLE_TAP_TIMEOUT_MS = 300L
+
+        // Pinch detection threshold
+        private const val PINCH_SCALE_THRESHOLD = 0.15f
     }
 
     private val renderer: GhosttyRenderer
@@ -98,6 +131,20 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
     // Visual scroll pixel offset for smooth sub-row animation (0 to fontLineSpacing)
     private var scrollPixelOffset = 0f
+
+    // Two-finger gesture state
+    private var twoFingerGestureActive = false
+    private var twoFingerStartX1 = 0f
+    private var twoFingerStartY1 = 0f
+    private var twoFingerStartX2 = 0f
+    private var twoFingerStartY2 = 0f
+    private var twoFingerStartTime = 0L
+    private var lastTwoFingerTapTime = 0L
+    private var twoFingerSwipeDetected = false
+
+    // Computed pixel thresholds (set in init)
+    private var twoFingerSwipeThresholdPx = 0f
+    private var twoFingerTapMaxDistancePx = 0f
 
     // Last row position used by OverScroller (for tracking delta during fling)
     private var lastScrollerRow = 0
@@ -543,6 +590,12 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 }
                 return true
             }
+
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                Log.d(TAG, "Single-finger double tap detected")
+                eventListener?.onDoubleTap()
+                return true
+            }
         })
 
         // Initialize OverScroller for fling physics
@@ -551,6 +604,11 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         // Initialize edge effects for overscroll feedback
         edgeEffectTop = EdgeEffect(context)
         edgeEffectBottom = EdgeEffect(context)
+
+        // Compute pixel thresholds from DP values
+        val density = context.resources.displayMetrics.density
+        twoFingerSwipeThresholdPx = TWO_FINGER_SWIPE_THRESHOLD_DP * density
+        twoFingerTapMaxDistancePx = TWO_FINGER_TAP_MAX_DISTANCE_DP * density
 
         Log.d(TAG, "GL Surface View initialized")
     }
@@ -679,16 +737,19 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         // Scale detector should take priority
         val scaleHandled = scaleGestureDetector.onTouchEvent(event)
 
+        // Track two-finger gestures
+        handleTwoFingerGesture(event)
+
         // Let scroll gesture detector handle the event
-        // Only process scroll if we're not in a scale gesture
-        val scrollHandled = if (!scaleGestureDetector.isInProgress) {
+        // Only process scroll if we're not in a scale gesture or two-finger gesture
+        val scrollHandled = if (!scaleGestureDetector.isInProgress && !twoFingerGestureActive) {
             gestureDetector.onTouchEvent(event)
         } else {
             false
         }
 
         // Handle edge effect release and bottom offset snap on ACTION_UP or ACTION_CANCEL
-        when (event.action) {
+        when (event.actionMasked) {
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 // Handle bottom offset snap animation
                 if (maxBottomOffset > 0 && (bottomOffset > 0 || accumulatedBottomDrag != 0f)) {
@@ -703,6 +764,9 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 if (!edgeEffectTop.isFinished || !edgeEffectBottom.isFinished) {
                     postInvalidateOnAnimation()
                 }
+
+                // Reset two-finger gesture state
+                resetTwoFingerGestureState()
             }
         }
 
@@ -786,5 +850,147 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         isBottomOffsetAnimating = true
 
         choreographer.postFrameCallback(bottomOffsetAnimationCallback)
+    }
+
+    /**
+     * Check if the current gesture is predominantly a pinch (scale) gesture.
+     */
+    private fun isPinchGesture(): Boolean {
+        if (!scaleGestureDetector.isInProgress) return false
+        val scaleFactor = scaleGestureDetector.scaleFactor
+        return abs(scaleFactor - 1.0f) > PINCH_SCALE_THRESHOLD
+    }
+
+    /**
+     * Reset two-finger gesture tracking state.
+     */
+    private fun resetTwoFingerGestureState() {
+        twoFingerGestureActive = false
+        twoFingerSwipeDetected = false
+    }
+
+    /**
+     * Handle two-finger gesture tracking.
+     */
+    private fun handleTwoFingerGesture(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // Second finger touched - start tracking two-finger gesture
+                if (event.pointerCount == 2) {
+                    twoFingerGestureActive = true
+                    twoFingerSwipeDetected = false
+                    twoFingerStartTime = System.currentTimeMillis()
+                    twoFingerStartX1 = event.getX(0)
+                    twoFingerStartY1 = event.getY(0)
+                    twoFingerStartX2 = event.getX(1)
+                    twoFingerStartY2 = event.getY(1)
+                }
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                if (twoFingerGestureActive && event.pointerCount == 2 && !twoFingerSwipeDetected) {
+                    // Don't process if this is a pinch gesture
+                    if (isPinchGesture()) {
+                        return
+                    }
+                    // Check for swipe gesture during movement
+                    checkTwoFingerSwipe(event)
+                }
+            }
+
+            MotionEvent.ACTION_POINTER_UP -> {
+                // When one finger lifts while we have 2 fingers, finalize two-finger gesture
+                if (event.pointerCount == 2 && twoFingerGestureActive) {
+                    finalizeTwoFingerGesture(event)
+                }
+            }
+        }
+    }
+
+    /**
+     * Check if the current movement constitutes a two-finger swipe.
+     */
+    private fun checkTwoFingerSwipe(event: MotionEvent) {
+        val elapsedTime = System.currentTimeMillis() - twoFingerStartTime
+        if (elapsedTime > TWO_FINGER_SWIPE_MAX_TIME_MS) {
+            return  // Too slow for swipe
+        }
+
+        // Calculate average movement of both fingers
+        val dx1 = event.getX(0) - twoFingerStartX1
+        val dy1 = event.getY(0) - twoFingerStartY1
+        val dx2 = event.getX(1) - twoFingerStartX2
+        val dy2 = event.getY(1) - twoFingerStartY2
+
+        val avgDy = (dy1 + dy2) / 2f
+
+        // Check if both fingers moved in the same vertical direction (parallel movement)
+        val sameDirection = (dy1 * dy2 > 0)
+        if (!sameDirection) {
+            return  // Fingers moving in opposite directions (likely pinch)
+        }
+
+        // Check if movement is primarily vertical and exceeds threshold
+        val absAvgDx = abs((dx1 + dx2) / 2f)
+        val absAvgDy = abs(avgDy)
+
+        if (absAvgDy < twoFingerSwipeThresholdPx) {
+            return  // Not enough vertical movement
+        }
+
+        if (absAvgDx > 0 && absAvgDy / absAvgDx < TWO_FINGER_DIRECTION_RATIO) {
+            return  // Not vertical enough (might be diagonal or horizontal)
+        }
+
+        // Swipe detected!
+        twoFingerSwipeDetected = true
+
+        if (avgDy < 0) {
+            // Swipe up (negative Y = up in Android coordinates)
+            Log.d(TAG, "Two-finger swipe UP detected")
+            eventListener?.onTwoFingerSwipeUp()
+        } else {
+            // Swipe down (positive Y = down)
+            Log.d(TAG, "Two-finger swipe DOWN detected")
+            eventListener?.onTwoFingerSwipeDown()
+        }
+    }
+
+    /**
+     * Finalize two-finger gesture when one finger lifts.
+     * Check for double-tap pattern.
+     */
+    private fun finalizeTwoFingerGesture(event: MotionEvent) {
+        if (!twoFingerGestureActive) return
+
+        val elapsedTime = System.currentTimeMillis() - twoFingerStartTime
+
+        // If no swipe was detected and gesture was quick, check for tap
+        if (!twoFingerSwipeDetected && elapsedTime < TWO_FINGER_TAP_MAX_TIME_MS) {
+            // Calculate total movement for both fingers
+            val dx1 = abs(event.getX(0) - twoFingerStartX1)
+            val dy1 = abs(event.getY(0) - twoFingerStartY1)
+            val dx2 = abs(event.getX(1) - twoFingerStartX2)
+            val dy2 = abs(event.getY(1) - twoFingerStartY2)
+
+            val maxMovement = maxOf(dx1, dy1, dx2, dy2)
+
+            if (maxMovement < twoFingerTapMaxDistancePx) {
+                // This is a valid two-finger tap
+                val currentTime = System.currentTimeMillis()
+
+                if (currentTime - lastTwoFingerTapTime < TWO_FINGER_DOUBLE_TAP_TIMEOUT_MS) {
+                    // Double tap detected!
+                    Log.d(TAG, "Two-finger DOUBLE TAP detected")
+                    eventListener?.onTwoFingerDoubleTap()
+                    lastTwoFingerTapTime = 0L  // Reset to avoid triple-tap detection
+                } else {
+                    // First tap, wait for second
+                    lastTwoFingerTapTime = currentTime
+                }
+            }
+        }
+
+        resetTwoFingerGestureState()
     }
 }
