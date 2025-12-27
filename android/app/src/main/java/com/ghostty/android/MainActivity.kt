@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.viewinterop.AndroidView
-import com.ghostty.android.renderer.BottomOffsetListener
+import com.ghostty.android.renderer.TerminalEventListener
 import com.ghostty.android.renderer.GhosttyGLSurfaceView
 import com.ghostty.android.terminal.GhosttyBridge
 import com.ghostty.android.terminal.TerminalSession
@@ -244,7 +244,10 @@ fun TestModeScreen(
 
                             // Configure bottom offset for keyboard gesture testing
                             view.setMaxBottomOffset(300f)
-                            view.setBottomOffsetListener(object : BottomOffsetListener {
+                            view.setEventListener(object : TerminalEventListener {
+                                override fun onSurfaceReady(cols: Int, rows: Int) {
+                                    android.util.Log.i("Terminal", "Surface ready: ${cols}x${rows}")
+                                }
                                 override fun onBottomOffsetChanged(offset: Float, maxOffset: Float) {
                                     android.util.Log.d("BottomOffset", "offset=$offset, max=$maxOffset")
                                 }
