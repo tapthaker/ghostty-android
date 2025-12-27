@@ -999,6 +999,13 @@ pub fn getFontLineSpacing(self: *Self) f32 {
     return self.uniforms.cell_size[1];
 }
 
+/// Get the content height in pixels (rows with content * line spacing)
+pub fn getContentHeight(self: *Self) f32 {
+    const content_rows = self.terminal_manager.getContentRows();
+    const line_spacing = self.uniforms.cell_size[1];
+    return @as(f32, @floatFromInt(content_rows)) * line_spacing;
+}
+
 /// Scroll the viewport by a delta number of rows
 /// Positive delta scrolls down (towards newer content/active area)
 /// Negative delta scrolls up (towards older content/scrollback)

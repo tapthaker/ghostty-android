@@ -35,21 +35,21 @@ interface TerminalEventListener {
     fun onSurfaceReady(cols: Int, rows: Int)
 
     /**
-     * Called during drag/animation with current offset progress.
+     * Called during drag/animation with current keyboard overlay offset progress.
      * Used to drive keyboard visibility animation.
      *
      * @param offset Current offset in pixels (0 to maxOffset)
      * @param maxOffset Maximum offset (keyboard height)
      */
-    fun onBottomOffsetChanged(offset: Float, maxOffset: Float)
+    fun onKeyboardOverlayProgress(offset: Float, maxOffset: Float)
 
     /**
-     * Called when offset state changes (expanded/collapsed).
+     * Called when keyboard overlay state changes (expanded/collapsed).
      * Used to finalize keyboard visibility animation.
      *
      * @param expanded true if keyboard area should be shown
      */
-    fun onBottomOffsetStateChanged(expanded: Boolean)
+    fun onKeyboardOverlayStateChanged(expanded: Boolean)
 
     /**
      * Called when user performs a two-finger swipe up gesture.
@@ -161,6 +161,7 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     private var bottomOffsetAnimationTargetValue = 0f
     private val bottomOffsetInterpolator = DecelerateInterpolator()
     private var lastBottomOffsetExpanded = false  // Track last state for callback
+    private var shouldScrollContentWithOverlay = true  // Whether to scroll content when overlay expands
 
     // Choreographer for driving fling animation at vsync
     private val choreographer = Choreographer.getInstance()
@@ -260,14 +261,15 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
             bottomOffset = bottomOffsetAnimationStartValue +
                 (bottomOffsetAnimationTargetValue - bottomOffsetAnimationStartValue) * interpolatedProgress
 
-            // Apply offset via renderer
+            // Apply offset via renderer only if content needs to scroll
             queueEvent {
-                renderer.setScrollPixelOffset(bottomOffset)
+                val scrollOffset = if (shouldScrollContentWithOverlay) bottomOffset else 0f
+                renderer.setScrollPixelOffset(scrollOffset)
                 requestRender()
             }
 
             // Notify listener of offset change
-            eventListener?.onBottomOffsetChanged(bottomOffset, maxBottomOffset)
+            eventListener?.onKeyboardOverlayProgress(bottomOffset, maxBottomOffset)
 
             if (progress >= 1f) {
                 // Animation complete
@@ -278,7 +280,7 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 val isExpanded = bottomOffset >= maxBottomOffset
                 if (isExpanded != lastBottomOffsetExpanded) {
                     lastBottomOffsetExpanded = isExpanded
-                    eventListener?.onBottomOffsetStateChanged(isExpanded)
+                    eventListener?.onKeyboardOverlayStateChanged(isExpanded)
                 }
             } else {
                 // Continue animation
@@ -437,9 +439,10 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 // Reset bottom offset drag tracking
                 bottomOffsetDragStart = bottomOffset
                 accumulatedBottomDrag = bottomOffset  // Start from current offset
-                // Preserve bottom offset if active, otherwise reset to 0
+                // Preserve scroll offset only if content should scroll with overlay
                 queueEvent {
-                    renderer.setScrollPixelOffset(bottomOffset)
+                    val scrollOffset = if (shouldScrollContentWithOverlay) bottomOffset else 0f
+                    renderer.setScrollPixelOffset(scrollOffset)
                 }
                 return true
             }
@@ -477,11 +480,20 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                     val newOffset = accumulatedBottomDrag.coerceIn(0f, maxBottomOffset)
                     if (newOffset != bottomOffset) {
                         bottomOffset = newOffset
+
+                        // Calculate whether content should scroll during drag
+                        val contentHeight = renderer.getContentHeight()
+                        val visibleHeightWithKeyboard = height - maxBottomOffset
+                        shouldScrollContentWithOverlay = contentHeight > visibleHeightWithKeyboard
+
+                        Log.d(TAG, "Overlay drag: contentHeight=$contentHeight, visibleHeight=$visibleHeightWithKeyboard, shouldScroll=$shouldScrollContentWithOverlay, viewHeight=$height, maxOffset=$maxBottomOffset")
+
                         queueEvent {
-                            renderer.setScrollPixelOffset(bottomOffset)
+                            val scrollOffset = if (shouldScrollContentWithOverlay) bottomOffset else 0f
+                            renderer.setScrollPixelOffset(scrollOffset)
                             requestRender()
                         }
-                        eventListener?.onBottomOffsetChanged(bottomOffset, maxBottomOffset)
+                        eventListener?.onKeyboardOverlayProgress(bottomOffset, maxBottomOffset)
                     }
                     // Reset scrollPixelOffset so normal scrolling starts fresh when we exit
                     scrollPixelOffset = 0f
@@ -755,6 +767,12 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 if (maxBottomOffset > 0 && (bottomOffset > 0 || accumulatedBottomDrag != 0f)) {
                     // Snap to nearest: if past 50%, expand; otherwise collapse
                     val target = if (bottomOffset > maxBottomOffset / 2) maxBottomOffset else 0f
+
+                    // Only scroll content if it won't fit in the visible area after keyboard
+                    val contentHeight = renderer.getContentHeight()
+                    val visibleHeightWithKeyboard = height - maxBottomOffset
+                    shouldScrollContentWithOverlay = contentHeight > visibleHeightWithKeyboard
+
                     animateBottomOffsetTo(target)
                     accumulatedBottomDrag = 0f
                 }
@@ -814,8 +832,8 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
      *
      * The listener receives:
      * - onSurfaceReady: when terminal surface is ready or resized
-     * - onBottomOffsetChanged: during keyboard gesture drag/animation
-     * - onBottomOffsetStateChanged: when keyboard gesture state changes
+     * - onKeyboardOverlayProgress: during keyboard gesture drag/animation
+     * - onKeyboardOverlayStateChanged: when keyboard gesture state changes
      */
     fun setEventListener(listener: TerminalEventListener?) {
         this.eventListener = listener

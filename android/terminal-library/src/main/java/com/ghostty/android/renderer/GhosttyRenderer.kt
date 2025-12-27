@@ -48,6 +48,7 @@ class GhosttyRenderer(
     // Scrolling native methods
     private external fun nativeGetScrollbackRows(): Int
     private external fun nativeGetFontLineSpacing(): Float
+    private external fun nativeGetContentHeight(): Float
     private external fun nativeScrollDelta(delta: Int)
     private external fun nativeIsViewportAtBottom(): Boolean
     private external fun nativeGetViewportOffset(): Int
@@ -253,6 +254,20 @@ class GhosttyRenderer(
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeGetFontLineSpacing", e)
             20f
+        }
+    }
+
+    /**
+     * Get the content height in pixels (actual rendered content, not full grid).
+     *
+     * @return Content height in pixels based on cursor position
+     */
+    fun getContentHeight(): Float {
+        return try {
+            nativeGetContentHeight()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeGetContentHeight", e)
+            0f
         }
     }
 

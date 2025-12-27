@@ -181,3 +181,11 @@ pub const CursorViewport = struct {
     y: u16,
     wide_tail: bool,
 };
+
+/// Get the number of content rows (cursor Y position + 1)
+/// This represents the rows that actually have content rendered
+pub fn getContentRows(self: *TerminalManager) usize {
+    const screen = self.terminal.screens.get(.primary).?;
+    // cursor.y is 0-indexed, so add 1 for total rows with content
+    return @as(usize, screen.cursor.y) + 1;
+}

@@ -427,6 +427,27 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetFontLineSpa
     return 20.0; // Default fallback
 }
 
+/// Get the content height in pixels (actual rendered content, not full grid)
+/// Java signature: float nativeGetContentHeight()
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetContentHeight(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) c.jfloat {
+    _ = env;
+    _ = obj;
+
+    if (!renderer_state.initialized) {
+        log.warn("Attempted to get content height before renderer initialized", .{});
+        return 0.0;
+    }
+
+    if (renderer_state.renderer) |*renderer| {
+        return renderer.getContentHeight();
+    }
+
+    return 0.0;
+}
+
 /// Scroll the viewport by a delta number of rows
 /// Positive delta scrolls down (towards newer content/active area)
 /// Negative delta scrolls up (towards older content/scrollback)
@@ -598,6 +619,7 @@ comptime {
     // Scrolling methods
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetScrollbackRows;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetFontLineSpacing;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetContentHeight;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeScrollDelta;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeIsViewportAtBottom;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetViewportOffset;

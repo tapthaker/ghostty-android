@@ -248,11 +248,11 @@ fun TestModeScreen(
                                 override fun onSurfaceReady(cols: Int, rows: Int) {
                                     android.util.Log.i("Terminal", "Surface ready: ${cols}x${rows}")
                                 }
-                                override fun onBottomOffsetChanged(offset: Float, maxOffset: Float) {
-                                    android.util.Log.d("BottomOffset", "offset=$offset, max=$maxOffset")
+                                override fun onKeyboardOverlayProgress(offset: Float, maxOffset: Float) {
+                                    android.util.Log.d("KeyboardOverlay", "progress=$offset, max=$maxOffset")
                                 }
-                                override fun onBottomOffsetStateChanged(expanded: Boolean) {
-                                    android.util.Log.i("BottomOffset", "expanded=$expanded")
+                                override fun onKeyboardOverlayStateChanged(expanded: Boolean) {
+                                    android.util.Log.i("KeyboardOverlay", "expanded=$expanded")
                                 }
                             })
                         }
