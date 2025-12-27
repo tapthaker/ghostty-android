@@ -142,6 +142,23 @@ object TestSuite {
             ansi("\u001B[4;32mUnderlined Green\u001B[0m\n")
             ansi("\u001B[1;4;33mBold Underlined Yellow\u001B[0m\n")
             ansi("\u001B[7;35mReverse Magenta\u001B[0m\n")
+        },
+
+        testCase("inverse_space_cursor", "Inverse video on space (terminal cursor)") {
+            tags("attributes", "cursor", "inverse", "regression")
+            ansi("\u001B[2J\u001B[H")  // Clear screen
+            ansi("Inverse Space Cursor Test:\n\n")
+            ansi("This tests that a SPACE with reverse video renders as a block.\n")
+            ansi("Used by terminals to render the cursor position.\n\n")
+            ansi("Cursor after text: ")
+            ansi("Hello\u001B[7m \u001B[27m")  // SGR 7 = inverse, space, SGR 27 = reset inverse
+            ansi("\n\n")
+            ansi("Cursor at start: ")
+            ansi("\u001B[7m \u001B[27m")  // Just the inverse space
+            ansi("World\n\n")
+            ansi("Multiple cursor positions:\n")
+            ansi("A\u001B[7m \u001B[27mB\u001B[7m \u001B[27mC\u001B[7m \u001B[27m\n\n")
+            ansi("If you see solid blocks after text, inverse space works correctly.")
         }
     )
 

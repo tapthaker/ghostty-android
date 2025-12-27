@@ -92,6 +92,11 @@ last_frame_time: i64 = 0,
 frame_count: u32 = 0,
 current_fps: u32 = 0,
 
+/// Cursor state for rendering (app-level state passed to cursor style helper)
+focused: bool = true,
+blink_visible: bool = true,
+preedit_active: bool = false,
+
 /// Initialize the renderer with optional initial dimensions and font size
 /// If initial_font_size_px is 0, uses the default font size
 pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16, initial_font_size_px: u32) !Self {
@@ -825,8 +830,8 @@ pub fn syncFromTerminal(self: *Self) !void {
             wide_char_count += 1;
         }
 
-        // Only add renderable glyphs (skip spaces with default colors)
-        if (cell.codepoint != ' ' or cell.fg_color[0] != 255 or cell.fg_color[1] != 255 or cell.fg_color[2] != 255) {
+        // Only add renderable glyphs (skip spaces with default colors, unless inverse for cursor)
+        if (cell.codepoint != ' ' or cell.fg_color[0] != 255 or cell.fg_color[1] != 255 or cell.fg_color[2] != 255 or cell.inverse) {
             // Track non-ASCII characters
             if (cell.codepoint > 127) {
                 non_ascii_count += 1;
@@ -912,35 +917,36 @@ pub fn syncFromTerminal(self: *Self) !void {
         }
     }
 
-    // Get cursor state from terminal
+    // Update render state and get cursor style using the cursor style helper.
+    // This properly handles visibility modes, blink state, password input, focus, etc.
+    try self.terminal_manager.updateRenderState();
+    const cursor_style_opt = self.terminal_manager.getCursorStyle(.{
+        .focused = self.focused,
+        .blink_visible = self.blink_visible,
+        .preedit = self.preedit_active,
+    });
+
+    // Get screen for viewport conversion
     const terminal = self.terminal_manager.getTerminal();
     const screen = terminal.screens.get(.primary).?;
-    const cursor = screen.cursor;
-    const cursor_visible = terminal.modes.get(.cursor_visible);
-
-    // Convert cursor position from active area to viewport coordinates.
-    // The cursor's page_pin tracks its position in the page list, and we need
-    // to convert that to viewport-relative coordinates for rendering.
-    // This returns null if the cursor is outside the visible viewport (e.g., scrolled off-screen).
     const cursor_viewport_point = screen.pages.pointFromPin(.viewport, screen.cursor.page_pin.*);
 
-    // Add cursor glyph if visible and within viewport
-    if (cursor_visible) {
+    // Render cursor if style is not null (cursor should be visible)
+    if (cursor_style_opt) |cursor_style| {
         if (cursor_viewport_point) |vp| {
-            // Cursor is visible in viewport - use viewport coordinates
             const viewport_x: u16 = @intCast(vp.viewport.x);
             const viewport_y: u16 = @intCast(vp.viewport.y);
 
             // Update cursor position in uniforms
             self.uniforms.cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(viewport_x, viewport_y);
 
-            // Choose cursor character based on style
-            const cursor_style = cursor.cursor_style;
+            // Map cursor style to Unicode character
             const cursor_char: u21 = switch (cursor_style) {
                 .block => 0x2588, // █ Full block
                 .bar => 0x258F, // ▏ Left one-eighth block (thin vertical bar)
                 .underline => 0x2581, // ▁ Lower one-eighth block (thin underline)
                 .block_hollow => 0x25A1, // □ White square (hollow block)
+                .lock => 0x25A3, // ▣ White square containing black square (password input)
             };
 
             // Add cursor glyph at the viewport position
@@ -955,13 +961,12 @@ pub fn syncFromTerminal(self: *Self) !void {
             );
             cursor_glyph.bools.is_cursor_glyph = true;
             try text_glyphs.append(self.allocator, cursor_glyph);
-
         } else {
             // Cursor is outside viewport (scrolled off-screen)
             self.uniforms.cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(255, 255);
         }
     } else {
-        // Hide cursor by setting position off-screen
+        // Cursor hidden (blink off, visibility disabled, etc.)
         self.uniforms.cursor_pos_packed_2u16 = shaders.Uniforms.pack2u16(255, 255);
     }
 
@@ -1016,6 +1021,28 @@ pub fn getViewportOffset(self: *Self) usize {
 /// Scroll viewport to the bottom (active area)
 pub fn scrollToBottom(self: *Self) void {
     self.terminal_manager.scrollToBottom();
+}
+
+// ============================================================================
+// Cursor State API (for future JNI binding)
+// ============================================================================
+
+/// Set whether the terminal surface has focus.
+/// When unfocused, the cursor renders as a hollow block.
+pub fn setFocused(self: *Self, focused: bool) void {
+    self.focused = focused;
+}
+
+/// Set the blink visible state for cursor animation.
+/// When false and cursor is blinking, cursor is hidden.
+pub fn setBlinkVisible(self: *Self, visible: bool) void {
+    self.blink_visible = visible;
+}
+
+/// Set whether IME preedit/composition is active.
+/// When active, cursor always shows as a block.
+pub fn setPreeditActive(self: *Self, active: bool) void {
+    self.preedit_active = active;
 }
 
 /// Set the visual scroll pixel offset for smooth sub-row scrolling
