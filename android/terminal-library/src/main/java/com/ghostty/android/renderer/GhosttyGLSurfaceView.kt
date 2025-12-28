@@ -9,7 +9,6 @@ import android.util.Log
 import android.view.Choreographer
 import android.view.GestureDetector
 import android.view.MotionEvent
-import android.view.ScaleGestureDetector
 import android.view.animation.DecelerateInterpolator
 import android.widget.EdgeEffect
 import android.widget.OverScroller
@@ -80,7 +79,9 @@ interface TerminalEventListener {
  * - OpenGL ES 3.1 context creation
  * - Renderer thread management
  * - Surface lifecycle (pause/resume)
- * - Pinch-to-zoom for font size adjustment
+ * - Touch gestures (scrolling, double-tap, two-finger swipes)
+ *
+ * Font size can be changed programmatically via [setFontSize].
  *
  * @param context Android context
  * @param attrs XML attributes (optional, for XML inflation)
@@ -116,13 +117,9 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         private const val TWO_FINGER_TAP_MAX_DISTANCE_DP = 20f
         private const val TWO_FINGER_TAP_MAX_TIME_MS = 200L
         private const val TWO_FINGER_DOUBLE_TAP_TIMEOUT_MS = 300L
-
-        // Pinch detection threshold
-        private const val PINCH_SCALE_THRESHOLD = 0.15f
     }
 
     private val renderer: GhosttyRenderer
-    private val scaleGestureDetector: ScaleGestureDetector
     private val gestureDetector: GestureDetector
     private val scroller: OverScroller
     private val edgeEffectTop: EdgeEffect
@@ -393,69 +390,6 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         // TODO: Change to RENDERMODE_WHEN_DIRTY once we have proper terminal update callbacks
         renderMode = RENDERMODE_CONTINUOUSLY
 
-        // Initialize pinch-to-zoom gesture detector
-        scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            private var baseFontSize = currentFontSize  // Store the font size at the start of gesture
-            private var accumulatedScale = 1f  // Track accumulated scale during the gesture
-            private var lastUpdateTime = 0L
-            private val UPDATE_THROTTLE_MS = 16L  // Throttle updates to max ~60 FPS for smooth scaling
-
-            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-                Log.d(TAG, "Pinch zoom started - current font size: $currentFontSize")
-                baseFontSize = currentFontSize  // Remember font size at gesture start
-                accumulatedScale = 1f  // Reset accumulated scale
-                lastUpdateTime = 0L
-                return true
-            }
-
-            override fun onScale(detector: ScaleGestureDetector): Boolean {
-                // Throttle updates to avoid overwhelming the renderer
-                val currentTime = System.currentTimeMillis()
-                if (currentTime - lastUpdateTime < UPDATE_THROTTLE_MS) {
-                    return true
-                }
-
-                // Get the current scale factor from the detector
-                // This is a RATIO: 1.0 = no change, >1.0 = zoom in, <1.0 = zoom out
-                val scaleFactor = detector.scaleFactor
-
-                // Accumulate the scale factor
-                // This gives us the total scale from the beginning of the gesture
-                accumulatedScale *= scaleFactor
-
-                // Calculate new font size based on the base size and accumulated scale
-                // This ensures smooth, predictable scaling
-                val newFontSize = baseFontSize * accumulatedScale
-
-                // Clamp to valid range (using instance min/max)
-                val clampedSize = newFontSize.coerceIn(minFontSize, maxFontSize)
-
-                // Only update if change is significant enough (avoid tiny updates)
-                if (kotlin.math.abs(clampedSize - currentFontSize) > 0.1f) {
-                    Log.i(TAG, "Font size: %.1f -> %.1f (scale factor: %.3f, accumulated: %.3f)".format(
-                        currentFontSize, clampedSize, scaleFactor, accumulatedScale
-                    ))
-                    currentFontSize = clampedSize
-                    lastUpdateTime = currentTime
-
-                    // Update font size on GL thread
-                    queueEvent {
-                        renderer.setFontSize(currentFontSize.toInt())
-                        requestRender()
-                    }
-                }
-
-                return true
-            }
-
-            override fun onScaleEnd(detector: ScaleGestureDetector) {
-                Log.d(TAG, "Pinch zoom ended - final font size: $currentFontSize")
-                // Reset for next gesture
-                baseFontSize = currentFontSize
-                accumulatedScale = 1f
-            }
-        })
-
         // Initialize scroll gesture detector
         gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean {
@@ -490,11 +424,6 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 distanceX: Float,
                 distanceY: Float
             ): Boolean {
-                // Don't scroll if we're in a scale gesture
-                if (scaleGestureDetector.isInProgress) {
-                    return false
-                }
-
                 // Get font line spacing for converting pixels to rows
                 val fontLineSpacing = renderer.getFontLineSpacing()
                 if (fontLineSpacing <= 0) return false
@@ -587,11 +516,6 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 velocityX: Float,
                 velocityY: Float
             ): Boolean {
-                // Don't fling if we're in a scale gesture
-                if (scaleGestureDetector.isInProgress) {
-                    return false
-                }
-
                 // Don't fling if we're in bottom offset mode - let the snap animation handle it
                 if (bottomOffset > 0 || (maxBottomOffset > 0 && renderer.isViewportAtBottom() && velocityY < 0)) {
                     return false
@@ -779,7 +703,7 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     }
 
     /**
-     * Handle touch events for pinch-to-zoom, scrolling, and other gestures.
+     * Handle touch events for scrolling and gestures.
      */
     override fun onTouchEvent(event: MotionEvent): Boolean {
         // If not interactive, don't process touch events
@@ -787,16 +711,12 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
             return false
         }
 
-        // Let both gesture detectors process the event
-        // Scale detector should take priority
-        val scaleHandled = scaleGestureDetector.onTouchEvent(event)
-
         // Track two-finger gestures
         handleTwoFingerGesture(event)
 
         // Let scroll gesture detector handle the event
-        // Only process scroll if we're not in a scale gesture or two-finger gesture
-        val scrollHandled = if (!scaleGestureDetector.isInProgress && !twoFingerGestureActive) {
+        // Only process scroll if not in a two-finger gesture
+        val scrollHandled = if (!twoFingerGestureActive) {
             gestureDetector.onTouchEvent(event)
         } else {
             false
@@ -830,7 +750,7 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
             }
         }
 
-        return scaleHandled || scrollHandled || true // Consume the event
+        return scrollHandled || true // Consume the event
     }
 
     /**
@@ -1003,15 +923,6 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     }
 
     /**
-     * Check if the current gesture is predominantly a pinch (scale) gesture.
-     */
-    private fun isPinchGesture(): Boolean {
-        if (!scaleGestureDetector.isInProgress) return false
-        val scaleFactor = scaleGestureDetector.scaleFactor
-        return abs(scaleFactor - 1.0f) > PINCH_SCALE_THRESHOLD
-    }
-
-    /**
      * Reset two-finger gesture tracking state.
      */
     private fun resetTwoFingerGestureState() {
@@ -1039,10 +950,6 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
             MotionEvent.ACTION_MOVE -> {
                 if (twoFingerGestureActive && event.pointerCount == 2 && !twoFingerSwipeDetected) {
-                    // Don't process if this is a pinch gesture
-                    if (isPinchGesture()) {
-                        return
-                    }
                     // Check for swipe gesture during movement
                     checkTwoFingerSwipe(event)
                 }
