@@ -769,24 +769,17 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
     // extract the reflowed content from ghostty-vt
     // Don't generate test glyphs here - syncFromTerminal will populate
     // the glyphs buffer with actual terminal content
-    log.info("Calling syncFromTerminal to extract reflowed content after resize", .{});
     try self.syncFromTerminal();
-
-    log.info("Font size update completed successfully - font_size={d:.1}pt, grid={}x{}", .{ self.font_system.collection.font_size.points, self.grid_cols, self.grid_rows });
 }
 
 /// Update renderer buffers from terminal state
 pub fn syncFromTerminal(self: *Self) !void {
-    log.info("syncFromTerminal: Starting sync - grid_cols={} grid_rows={}", .{ self.grid_cols, self.grid_rows });
-
     // Extract cell data from terminal
     const cells = try screen_extractor.extractCells(
         self.allocator,
         self.terminal_manager.getTerminal(),
     );
     defer screen_extractor.freeCells(self.allocator, cells);
-
-    log.info("syncFromTerminal: Extracted {} cells from terminal (expected {})", .{ cells.len, self.grid_cols * self.grid_rows });
 
     // Allocate temp buffers for GPU data
     const num_cells: usize = @intCast(self.grid_cols * self.grid_rows);
@@ -800,9 +793,6 @@ pub fn syncFromTerminal(self: *Self) !void {
     @memset(cell_bg_colors, 0);
 
     // Process each cell
-    var skipped_count: usize = 0;
-    var non_ascii_count: usize = 0;
-    var wide_char_count: usize = 0;
     for (cells) |cell| {
         const idx: usize = @as(usize, cell.row) * @as(usize, self.grid_cols) + @as(usize, cell.col);
 
@@ -821,22 +811,11 @@ pub fn syncFromTerminal(self: *Self) !void {
 
         // Skip null characters (empty/uninitialized cells)
         if (cell.codepoint == 0) {
-            skipped_count += 1;
             continue;
-        }
-
-        // Track wide characters
-        if (cell.width == 2) {
-            wide_char_count += 1;
         }
 
         // Only add renderable glyphs (skip spaces with default colors, unless inverse for cursor)
         if (cell.codepoint != ' ' or cell.fg_color[0] != 255 or cell.fg_color[1] != 255 or cell.fg_color[2] != 255 or cell.inverse) {
-            // Track non-ASCII characters
-            if (cell.codepoint > 127) {
-                non_ascii_count += 1;
-            }
-
             // Convert CellData attributes to CellText attributes
             const attributes = shaders.CellText.Attributes{
                 .bold = cell.bold,
@@ -887,33 +866,6 @@ pub fn syncFromTerminal(self: *Self) !void {
 
             // Underline is now rendered in the fragment shader as a graphical overlay
             // No need to add separate underline characters anymore
-        } else {
-            skipped_count += 1;
-        }
-    }
-
-    log.info("Cell processing: {} total cells, {} glyphs added, {} spaces skipped, {} non-ASCII, {} wide chars", .{
-        cells.len,
-        text_glyphs.items.len,
-        skipped_count,
-        non_ascii_count,
-        wide_char_count,
-    });
-
-    // Note: FPS overlay is now rendered separately in render() with scroll_pixel_offset=0
-
-    // Log sample of first row content for debugging
-    if (cells.len > 0) {
-        var sample_text: [80]u8 = undefined;
-        var idx: usize = 0;
-        for (cells[0..@min(self.grid_cols, cells.len)]) |cell| {
-            if (idx < 79 and cell.codepoint >= 32 and cell.codepoint < 127) {
-                sample_text[idx] = @truncate(cell.codepoint);
-                idx += 1;
-            }
-        }
-        if (idx > 0) {
-            log.info("First row sample: {s}", .{sample_text[0..idx]});
         }
     }
 
@@ -975,8 +927,6 @@ pub fn syncFromTerminal(self: *Self) !void {
 
     // Sync uniforms to GPU (includes cursor position update)
     try self.syncUniforms();
-
-    log.info("Synced {} glyphs to GPU from terminal", .{self.num_test_glyphs});
 }
 
 /// Process VT input and sync to renderer
