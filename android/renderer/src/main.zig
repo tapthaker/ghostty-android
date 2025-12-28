@@ -2,6 +2,9 @@
 ///!
 ///! This module provides a JNI bridge for rendering terminal content
 ///! using OpenGL ES 3.1 on Android devices.
+///!
+///! Each GhosttyRenderer instance in Kotlin has its own native handle,
+///! allowing multiple GLSurfaceViews (e.g., in RecyclerView) to coexist.
 
 const std = @import("std");
 const c = @cImport({
@@ -77,15 +80,106 @@ const log = struct {
 // Global allocator
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
-// Renderer state
+// Renderer state - now stored per-instance
 const RendererState = struct {
     renderer: ?Renderer = null,
     initialized: bool = false,
-    surface_sized: bool = false,  // Track if surface has been sized at least once
-    initial_font_size: u32 = 0,   // Initial font size in pixels (0 = use default)
+    surface_sized: bool = false, // Track if surface has been sized at least once
+    initial_font_size: u32 = 0, // Initial font size in pixels (0 = use default)
 };
 
-var renderer_state: RendererState = .{};
+// Map of handle ID -> RendererState
+// Using AutoHashMap with u64 keys for the handle
+var renderer_map: std.AutoHashMap(u64, *RendererState) = undefined;
+var renderer_map_initialized: bool = false;
+var next_handle: u64 = 1;
+var map_mutex: std.Thread.Mutex = .{};
+
+fn ensureMapInitialized() void {
+    if (!renderer_map_initialized) {
+        renderer_map = std.AutoHashMap(u64, *RendererState).init(gpa.allocator());
+        renderer_map_initialized = true;
+    }
+}
+
+fn getRendererState(handle: u64) ?*RendererState {
+    map_mutex.lock();
+    defer map_mutex.unlock();
+
+    ensureMapInitialized();
+    return renderer_map.get(handle);
+}
+
+fn createRendererState() !u64 {
+    map_mutex.lock();
+    defer map_mutex.unlock();
+
+    ensureMapInitialized();
+
+    const allocator = gpa.allocator();
+    const state = try allocator.create(RendererState);
+    state.* = .{};
+
+    const handle = next_handle;
+    next_handle += 1;
+
+    try renderer_map.put(handle, state);
+    log.info("Created renderer state with handle {d}", .{handle});
+    return handle;
+}
+
+fn destroyRendererState(handle: u64) void {
+    map_mutex.lock();
+    defer map_mutex.unlock();
+
+    ensureMapInitialized();
+
+    if (renderer_map.fetchRemove(handle)) |kv| {
+        const state = kv.value;
+        if (state.renderer) |*renderer| {
+            renderer.deinit();
+        }
+        gpa.allocator().destroy(state);
+        log.info("Destroyed renderer state with handle {d}", .{handle});
+    }
+}
+
+// Helper to get the native handle from the Java object
+fn getNativeHandle(env: *c.JNIEnv, obj: c.jobject) u64 {
+    const env_vtable = env.*.?;
+    const cls = env_vtable.*.GetObjectClass.?(env, obj);
+    if (cls == null) {
+        log.err("Failed to get object class", .{});
+        return 0;
+    }
+
+    const field_id = env_vtable.*.GetFieldID.?(env, cls, "nativeHandle", "J");
+    if (field_id == null) {
+        log.err("Failed to get nativeHandle field ID", .{});
+        return 0;
+    }
+
+    const handle = env_vtable.*.GetLongField.?(env, obj, field_id);
+    return @bitCast(handle);
+}
+
+// Helper to set the native handle on the Java object
+fn setNativeHandle(env: *c.JNIEnv, obj: c.jobject, handle: u64) void {
+    const env_vtable = env.*.?;
+    const cls = env_vtable.*.GetObjectClass.?(env, obj);
+    if (cls == null) {
+        log.err("Failed to get object class for setting handle", .{});
+        return;
+    }
+
+    const field_id = env_vtable.*.GetFieldID.?(env, cls, "nativeHandle", "J");
+    if (field_id == null) {
+        log.err("Failed to get nativeHandle field ID for setting", .{});
+        return;
+    }
+
+    env_vtable.*.SetLongField.?(env, obj, field_id, @bitCast(handle));
+}
 
 /// JNI_OnLoad - Called when the library is loaded
 export fn JNI_OnLoad(vm: *c.JavaVM, reserved: ?*anyopaque) c.jint {
@@ -103,6 +197,19 @@ export fn JNI_OnUnload(vm: *c.JavaVM, reserved: ?*anyopaque) void {
 
     log.info("Ghostty Renderer library unloaded", .{});
 
+    // Cleanup all renderer states
+    if (renderer_map_initialized) {
+        var iter = renderer_map.iterator();
+        while (iter.next()) |entry| {
+            const state = entry.value_ptr.*;
+            if (state.renderer) |*renderer| {
+                renderer.deinit();
+            }
+            gpa.allocator().destroy(state);
+        }
+        renderer_map.deinit();
+    }
+
     // Cleanup global allocator
     _ = gpa.deinit();
 }
@@ -113,10 +220,9 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceCreat
     env: *c.JNIEnv,
     obj: c.jobject,
 ) void {
-    _ = env;
-    _ = obj;
+    var handle = getNativeHandle(env, obj);
 
-    log.info("nativeOnSurfaceCreated - OpenGL context (re)created", .{});
+    log.info("nativeOnSurfaceCreated - handle={d}, OpenGL context (re)created", .{handle});
 
     // Get OpenGL version
     const version = c.glGetString(c.GL_VERSION);
@@ -146,6 +252,22 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceCreat
         return;
     }
 
+    // If no handle exists yet, create one
+    if (handle == 0) {
+        handle = createRendererState() catch |err| {
+            log.err("Failed to create renderer state: {}", .{err});
+            return;
+        };
+        setNativeHandle(env, obj, handle);
+        log.info("Created new renderer state with handle {d}", .{handle});
+    }
+
+    // Get the renderer state for this instance
+    const state = getRendererState(handle) orelse {
+        log.err("No renderer state found for handle {d}", .{handle});
+        return;
+    };
+
     // IMPORTANT: When onSurfaceCreated is called, the OpenGL context has been (re)created.
     // This happens when:
     // - The app first starts
@@ -156,17 +278,17 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceCreat
     // become invalid and must be recreated.
 
     // Clean up the old renderer if it exists (its OpenGL objects are now invalid)
-    if (renderer_state.renderer) |*renderer| {
-        log.info("Cleaning up old renderer (OpenGL context was recreated)", .{});
+    if (state.renderer) |*renderer| {
+        log.info("Cleaning up old renderer for handle {d} (OpenGL context was recreated)", .{handle});
         renderer.deinit();
-        renderer_state.renderer = null;
+        state.renderer = null;
     }
 
     // Reset initialization state so onSurfaceChanged will recreate the renderer
-    renderer_state.initialized = false;
-    renderer_state.surface_sized = false;
+    state.initialized = false;
+    state.surface_sized = false;
 
-    log.info("OpenGL context ready, renderer will be recreated in onSurfaceChanged", .{});
+    log.info("OpenGL context ready for handle {d}, renderer will be recreated in onSurfaceChanged", .{handle});
 }
 
 /// Called when OpenGL surface size changes
@@ -179,46 +301,55 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceChang
     dpi: c.jint,
     font_size: c.jint,
 ) void {
-    _ = env;
-    _ = obj;
+    const handle = getNativeHandle(env, obj);
 
-    log.info("nativeOnSurfaceChanged: {d}x{d} at {d} DPI, font size: {d}px", .{ width, height, dpi, font_size });
+    log.info("nativeOnSurfaceChanged: handle={d}, {d}x{d} at {d} DPI, font size: {d}px", .{ handle, width, height, dpi, font_size });
+
+    if (handle == 0) {
+        log.err("No native handle set, call nativeOnSurfaceCreated first", .{});
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        log.err("No renderer state found for handle {d}", .{handle});
+        return;
+    };
 
     // Note: glViewport will be set by the renderer to match the expanded projection matrix
     // This ensures viewport and projection dimensions are in sync to avoid GL errors
 
     // Mark that surface has been sized at least once
-    renderer_state.surface_sized = true;
+    state.surface_sized = true;
 
     // Store initial font size for potential re-initialization
     const font_size_u32: u32 = if (font_size > 0) @intCast(font_size) else 0;
     if (font_size_u32 > 0) {
-        renderer_state.initial_font_size = font_size_u32;
+        state.initial_font_size = font_size_u32;
     }
 
     // Initialize renderer on first surface change (now we have real dimensions!)
-    if (!renderer_state.initialized) {
-        log.info("Initializing renderer with actual surface dimensions: {d}x{d} at {d} DPI, font size: {d}px", .{ width, height, dpi, font_size });
+    if (!state.initialized) {
+        log.info("Initializing renderer for handle {d} with dimensions: {d}x{d} at {d} DPI, font size: {d}px", .{ handle, width, height, dpi, font_size });
 
         const allocator = gpa.allocator();
-        renderer_state.renderer = Renderer.init(allocator, @intCast(width), @intCast(height), @intCast(dpi), renderer_state.initial_font_size) catch |err| {
+        state.renderer = Renderer.init(allocator, @intCast(width), @intCast(height), @intCast(dpi), state.initial_font_size) catch |err| {
             log.err("Failed to initialize renderer: {}", .{err});
             return;
         };
-        renderer_state.initialized = true;
+        state.initialized = true;
 
-        log.info("Renderer initialized successfully with correct dimensions", .{});
+        log.info("Renderer initialized successfully for handle {d}", .{handle});
         log.info("Viewport set to {d}x{d}", .{ width, height });
         return; // Don't resize on first init - we just initialized with correct size!
     }
 
     // Only resize if dimensions actually changed
-    if (renderer_state.renderer) |*renderer| {
+    if (state.renderer) |*renderer| {
         const current_size = .{ .width = renderer.width, .height = renderer.height };
         const new_size = .{ .width = @as(u32, @intCast(width)), .height = @as(u32, @intCast(height)) };
 
         if (current_size.width != new_size.width or current_size.height != new_size.height) {
-            log.info("Surface dimensions changed, resizing renderer", .{});
+            log.info("Surface dimensions changed for handle {d}, resizing renderer", .{handle});
             renderer.resize(new_size.width, new_size.height) catch |err| {
                 log.err("Failed to resize renderer: {}", .{err});
                 return;
@@ -238,22 +369,29 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnDrawFrame(
     env: *c.JNIEnv,
     obj: c.jobject,
 ) void {
-    _ = env;
-    _ = obj;
+    const handle = getNativeHandle(env, obj);
 
-    if (!renderer_state.initialized) {
-        log.warn("Attempted to draw frame before renderer initialized", .{});
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
+        log.warn("Attempted to draw frame before renderer initialized (handle={d})", .{handle});
         return;
     }
 
     // Render using the renderer module
-    if (renderer_state.renderer) |*renderer| {
+    if (state.renderer) |*renderer| {
         renderer.render() catch |err| {
             log.err("Failed to render frame: {}", .{err});
             return;
         };
     } else {
-        log.warn("Renderer not initialized", .{});
+        log.warn("Renderer not initialized (handle={d})", .{handle});
     }
 }
 
@@ -263,19 +401,18 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeDestroy(
     env: *c.JNIEnv,
     obj: c.jobject,
 ) void {
-    _ = env;
-    _ = obj;
+    const handle = getNativeHandle(env, obj);
 
-    log.info("nativeDestroy", .{});
+    log.info("nativeDestroy (handle={d})", .{handle});
 
-    if (renderer_state.renderer) |*renderer| {
-        renderer.deinit();
+    if (handle == 0) {
+        return;
     }
 
-    renderer_state.initialized = false;
-    renderer_state.renderer = null;
+    destroyRendererState(handle);
+    setNativeHandle(env, obj, 0);
 
-    log.info("Renderer destroyed", .{});
+    log.info("Renderer destroyed (handle={d})", .{handle});
 }
 
 /// Set terminal size (rows/columns)
@@ -302,17 +439,26 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetFontSize(
     obj: c.jobject,
     font_size: c.jint,
 ) void {
-    _ = env;
-    _ = obj;
+    const handle = getNativeHandle(env, obj);
 
-    log.info("nativeSetFontSize: {d}px", .{font_size});
+    log.info("nativeSetFontSize: {d}px (handle={d})", .{ font_size, handle });
 
-    if (!renderer_state.initialized) {
+    if (handle == 0) {
+        log.warn("No native handle set", .{});
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        log.warn("No renderer state for handle {d}", .{handle});
+        return;
+    };
+
+    if (!state.initialized) {
         log.warn("Attempted to set font size before renderer initialized", .{});
         return;
     }
 
-    if (renderer_state.renderer) |*renderer| {
+    if (state.renderer) |*renderer| {
         renderer.updateFontSize(@intCast(font_size)) catch |err| {
             log.err("Failed to update font size: {}", .{err});
             return;
@@ -330,16 +476,26 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeProcessInput(
     obj: c.jobject,
     ansiSequence: c.jstring,
 ) void {
-    _ = obj;
+    const handle = getNativeHandle(env, obj);
 
-    log.info("nativeProcessInput called", .{});
+    log.info("nativeProcessInput called (handle={d})", .{handle});
 
-    if (!renderer_state.initialized) {
+    if (handle == 0) {
+        log.warn("No native handle set", .{});
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        log.warn("No renderer state for handle {d}", .{handle});
+        return;
+    };
+
+    if (!state.initialized) {
         log.warn("Attempted to process input before renderer initialized", .{});
         return;
     }
 
-    if (renderer_state.renderer) |*renderer| {
+    if (state.renderer) |*renderer| {
         // Get the string length first to allocate appropriate buffer
         const env_vtable = env.*.?;
         const str_len = env_vtable.*.GetStringUTFLength.?(env, ansiSequence);
@@ -390,15 +546,22 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetScrollbackR
     env: *c.JNIEnv,
     obj: c.jobject,
 ) c.jint {
-    _ = env;
-    _ = obj;
+    const handle = getNativeHandle(env, obj);
 
-    if (!renderer_state.initialized) {
+    if (handle == 0) {
+        return 0;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return 0;
+    };
+
+    if (!state.initialized) {
         log.warn("Attempted to get scrollback rows before renderer initialized", .{});
         return 0;
     }
 
-    if (renderer_state.renderer) |*renderer| {
+    if (state.renderer) |*renderer| {
         const rows = renderer.getScrollbackRows();
         return @intCast(rows);
     }
@@ -412,15 +575,22 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetFontLineSpa
     env: *c.JNIEnv,
     obj: c.jobject,
 ) c.jfloat {
-    _ = env;
-    _ = obj;
+    const handle = getNativeHandle(env, obj);
 
-    if (!renderer_state.initialized) {
+    if (handle == 0) {
+        return 20.0;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return 20.0;
+    };
+
+    if (!state.initialized) {
         log.warn("Attempted to get font line spacing before renderer initialized", .{});
         return 20.0; // Default fallback
     }
 
-    if (renderer_state.renderer) |*renderer| {
+    if (state.renderer) |*renderer| {
         return renderer.getFontLineSpacing();
     }
 
@@ -433,15 +603,22 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetContentHeig
     env: *c.JNIEnv,
     obj: c.jobject,
 ) c.jfloat {
-    _ = env;
-    _ = obj;
+    const handle = getNativeHandle(env, obj);
 
-    if (!renderer_state.initialized) {
+    if (handle == 0) {
+        return 0.0;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return 0.0;
+    };
+
+    if (!state.initialized) {
         log.warn("Attempted to get content height before renderer initialized", .{});
         return 0.0;
     }
 
-    if (renderer_state.renderer) |*renderer| {
+    if (state.renderer) |*renderer| {
         return renderer.getContentHeight();
     }
 
@@ -457,15 +634,22 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeScrollDelta(
     obj: c.jobject,
     delta: c.jint,
 ) void {
-    _ = env;
-    _ = obj;
+    const handle = getNativeHandle(env, obj);
 
-    if (!renderer_state.initialized) {
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
         log.warn("Attempted to scroll before renderer initialized", .{});
         return;
     }
 
-    if (renderer_state.renderer) |*renderer| {
+    if (state.renderer) |*renderer| {
         renderer.scrollDelta(delta);
         log.debug("Scrolled viewport by {} rows", .{delta});
     }
@@ -477,14 +661,21 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeIsViewportAtBo
     env: *c.JNIEnv,
     obj: c.jobject,
 ) c.jboolean {
-    _ = env;
-    _ = obj;
+    const handle = getNativeHandle(env, obj);
 
-    if (!renderer_state.initialized) {
+    if (handle == 0) {
+        return c.JNI_TRUE;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return c.JNI_TRUE;
+    };
+
+    if (!state.initialized) {
         return c.JNI_TRUE; // Default to bottom when not initialized
     }
 
-    if (renderer_state.renderer) |*renderer| {
+    if (state.renderer) |*renderer| {
         return if (renderer.isViewportAtBottom()) c.JNI_TRUE else c.JNI_FALSE;
     }
 
@@ -497,14 +688,21 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetViewportOff
     env: *c.JNIEnv,
     obj: c.jobject,
 ) c.jint {
-    _ = env;
-    _ = obj;
+    const handle = getNativeHandle(env, obj);
 
-    if (!renderer_state.initialized) {
+    if (handle == 0) {
         return 0;
     }
 
-    if (renderer_state.renderer) |*renderer| {
+    const state = getRendererState(handle) orelse {
+        return 0;
+    };
+
+    if (!state.initialized) {
+        return 0;
+    }
+
+    if (state.renderer) |*renderer| {
         const offset = renderer.getViewportOffset();
         return @intCast(offset);
     }
@@ -518,15 +716,22 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeScrollToBottom
     env: *c.JNIEnv,
     obj: c.jobject,
 ) void {
-    _ = env;
-    _ = obj;
+    const handle = getNativeHandle(env, obj);
 
-    if (!renderer_state.initialized) {
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
         log.warn("Attempted to scroll to bottom before renderer initialized", .{});
         return;
     }
 
-    if (renderer_state.renderer) |*renderer| {
+    if (state.renderer) |*renderer| {
         renderer.scrollToBottom();
         log.debug("Scrolled viewport to bottom", .{});
     }
@@ -541,14 +746,21 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetScrollPixel
     obj: c.jobject,
     offset: c.jfloat,
 ) void {
-    _ = env;
-    _ = obj;
+    const handle = getNativeHandle(env, obj);
 
-    if (!renderer_state.initialized) {
+    if (handle == 0) {
         return;
     }
 
-    if (renderer_state.renderer) |*renderer| {
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
+        return;
+    }
+
+    if (state.renderer) |*renderer| {
         renderer.setScrollPixelOffset(offset);
     }
 }
@@ -560,15 +772,22 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetShowFps(
     obj: c.jobject,
     show: c.jboolean,
 ) void {
-    _ = env;
-    _ = obj;
+    const handle = getNativeHandle(env, obj);
 
-    if (!renderer_state.initialized) {
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
         log.warn("Attempted to set show FPS before renderer initialized", .{});
         return;
     }
 
-    if (renderer_state.renderer) |*renderer| {
+    if (state.renderer) |*renderer| {
         renderer.setShowFps(show == c.JNI_TRUE);
     }
 }
@@ -580,8 +799,7 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetGridSize(
     env: *c.JNIEnv,
     obj: c.jobject,
 ) c.jintArray {
-    _ = obj;
-
+    const handle = getNativeHandle(env, obj);
     const env_vtable = env.*.?;
 
     // Create a new int array of size 2
@@ -593,9 +811,19 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetGridSize(
 
     var grid_size: [2]c.jint = .{ 0, 0 };
 
-    if (!renderer_state.initialized) {
+    if (handle == 0) {
+        env_vtable.*.SetIntArrayRegion.?(env, result, 0, 2, &grid_size);
+        return result;
+    }
+
+    const state = getRendererState(handle) orelse {
+        env_vtable.*.SetIntArrayRegion.?(env, result, 0, 2, &grid_size);
+        return result;
+    };
+
+    if (!state.initialized) {
         log.warn("Attempted to get grid size before renderer initialized", .{});
-    } else if (renderer_state.renderer) |*renderer| {
+    } else if (state.renderer) |*renderer| {
         grid_size[0] = @intCast(renderer.grid_cols);
         grid_size[1] = @intCast(renderer.grid_rows);
     }

@@ -20,6 +20,15 @@ class GhosttyRenderer(
     private val initialFontSize: Int = 0
 ) : GLSurfaceView.Renderer {
 
+    /**
+     * Native handle for this renderer instance.
+     * Each GhosttyRenderer has its own native state, allowing multiple
+     * GLSurfaceViews (e.g., in RecyclerView) to coexist without conflicts.
+     * This is set by native code in onSurfaceCreated and cleared in destroy.
+     */
+    @JvmField
+    var nativeHandle: Long = 0
+
     companion object {
         private const val TAG = "GhosttyRenderer"
 
