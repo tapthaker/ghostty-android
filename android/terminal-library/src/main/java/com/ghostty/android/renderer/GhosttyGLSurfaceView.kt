@@ -99,9 +99,9 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         private const val GLES_MAJOR_VERSION = 3
         private const val GLES_CONTEXT_CLIENT_VERSION = 3 // Request ES 3.x
 
-        // Font size constraints
-        private const val MIN_FONT_SIZE = 8f
-        private const val MAX_FONT_SIZE = 96f
+        // Font size defaults (can be overridden per instance)
+        private const val DEFAULT_MIN_FONT_SIZE = 8f
+        private const val DEFAULT_MAX_FONT_SIZE = 96f
         private const val DEFAULT_FONT_SIZE = 20f  // More reasonable default
 
         // Bottom offset animation
@@ -128,6 +128,13 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     private val edgeEffectTop: EdgeEffect
     private val edgeEffectBottom: EdgeEffect
     private var currentFontSize = DEFAULT_FONT_SIZE
+
+    // Configurable font size bounds (can be set via XML or programmatically)
+    private var minFontSize = DEFAULT_MIN_FONT_SIZE
+    private var maxFontSize = DEFAULT_MAX_FONT_SIZE
+
+    // Interactive mode - when false, touch events are not processed
+    private var isInteractive = true
 
     // Visual scroll pixel offset for smooth sub-row animation (0 to fontLineSpacing)
     private var scrollPixelOffset = 0f
@@ -304,6 +311,31 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                     R.styleable.GhosttyGLSurfaceView_initialFontSize,
                     0f
                 )
+
+                // Parse min/max font size if specified
+                val xmlMinFontSize = typedArray.getDimension(
+                    R.styleable.GhosttyGLSurfaceView_minFontSize,
+                    0f
+                )
+                val xmlMaxFontSize = typedArray.getDimension(
+                    R.styleable.GhosttyGLSurfaceView_maxFontSize,
+                    0f
+                )
+
+                // Parse interactive mode
+                isInteractive = typedArray.getBoolean(
+                    R.styleable.GhosttyGLSurfaceView_interactive,
+                    true
+                )
+
+                // Apply min/max font size if specified
+                if (xmlMinFontSize > 0f) {
+                    minFontSize = xmlMinFontSize.coerceAtLeast(1f)
+                }
+                if (xmlMaxFontSize > 0f) {
+                    maxFontSize = xmlMaxFontSize.coerceAtLeast(minFontSize)
+                }
+
                 // Use XML value if specified, otherwise use constructor parameter
                 if (xmlFontSize > 0f) xmlFontSize else initialFontSize
             } finally {
@@ -315,8 +347,13 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         }
 
         // Set current font size: use resolved value if specified, otherwise use default
-        currentFontSize = if (resolvedFontSize > 0f) resolvedFontSize else DEFAULT_FONT_SIZE
-        Log.d(TAG, "Initial font size: $currentFontSize px")
+        // Clamp to configured min/max bounds
+        currentFontSize = if (resolvedFontSize > 0f) {
+            resolvedFontSize.coerceIn(minFontSize, maxFontSize)
+        } else {
+            DEFAULT_FONT_SIZE.coerceIn(minFontSize, maxFontSize)
+        }
+        Log.d(TAG, "Initial font size: $currentFontSize px (min: $minFontSize, max: $maxFontSize, interactive: $isInteractive)")
 
         // Request OpenGL ES 3.x context
         setEGLContextClientVersion(GLES_CONTEXT_CLIENT_VERSION)
@@ -390,8 +427,8 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 // This ensures smooth, predictable scaling
                 val newFontSize = baseFontSize * accumulatedScale
 
-                // Clamp to valid range
-                val clampedSize = max(MIN_FONT_SIZE, min(MAX_FONT_SIZE, newFontSize))
+                // Clamp to valid range (using instance min/max)
+                val clampedSize = newFontSize.coerceIn(minFontSize, maxFontSize)
 
                 // Only update if change is significant enough (avoid tiny updates)
                 if (kotlin.math.abs(clampedSize - currentFontSize) > 0.1f) {
@@ -745,6 +782,11 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
      * Handle touch events for pinch-to-zoom, scrolling, and other gestures.
      */
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // If not interactive, don't process touch events
+        if (!isInteractive) {
+            return false
+        }
+
         // Let both gesture detectors process the event
         // Scale detector should take priority
         val scaleHandled = scaleGestureDetector.onTouchEvent(event)
@@ -852,6 +894,96 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
      * @return true if offset equals maxBottomOffset and maxBottomOffset > 0
      */
     fun isBottomOffsetExpanded(): Boolean = maxBottomOffset > 0 && bottomOffset >= maxBottomOffset
+
+    // ==================== Font Size API ====================
+
+    /**
+     * Set the font size programmatically.
+     *
+     * The size will be clamped to the configured min/max bounds.
+     * This triggers a re-render with the new font size.
+     *
+     * @param fontSize Font size in pixels
+     */
+    fun setFontSize(fontSize: Float) {
+        val clampedSize = fontSize.coerceIn(minFontSize, maxFontSize)
+        if (kotlin.math.abs(clampedSize - currentFontSize) > 0.1f) {
+            Log.i(TAG, "setFontSize: $currentFontSize -> $clampedSize")
+            currentFontSize = clampedSize
+            queueEvent {
+                renderer.setFontSize(currentFontSize.toInt())
+                requestRender()
+            }
+        }
+    }
+
+    /**
+     * Get the current font size.
+     *
+     * @return Current font size in pixels
+     */
+    fun getFontSize(): Float = currentFontSize
+
+    /**
+     * Set the minimum and maximum font size bounds.
+     *
+     * The current font size will be re-clamped if it falls outside the new bounds.
+     *
+     * @param min Minimum font size in pixels (will be coerced to at least 1)
+     * @param max Maximum font size in pixels (will be coerced to at least min)
+     */
+    fun setFontSizeBounds(min: Float, max: Float) {
+        minFontSize = min.coerceAtLeast(1f)
+        maxFontSize = max.coerceAtLeast(minFontSize)
+        Log.d(TAG, "Font size bounds set: min=$minFontSize, max=$maxFontSize")
+
+        // Re-clamp current font size if needed
+        val clampedSize = currentFontSize.coerceIn(minFontSize, maxFontSize)
+        if (clampedSize != currentFontSize) {
+            setFontSize(clampedSize)
+        }
+    }
+
+    /**
+     * Get the minimum font size bound.
+     *
+     * @return Minimum font size in pixels
+     */
+    fun getMinFontSize(): Float = minFontSize
+
+    /**
+     * Get the maximum font size bound.
+     *
+     * @return Maximum font size in pixels
+     */
+    fun getMaxFontSize(): Float = maxFontSize
+
+    // ==================== Interactive Mode API ====================
+
+    /**
+     * Set whether the terminal is interactive.
+     *
+     * When interactive is false:
+     * - Touch events are not processed (scrolling, pinch-to-zoom disabled)
+     * - The terminal becomes a read-only display
+     *
+     * Use this for preview/thumbnail modes where user interaction is not desired.
+     *
+     * @param interactive true to enable interaction, false to disable
+     */
+    fun setInteractive(interactive: Boolean) {
+        if (this.isInteractive != interactive) {
+            Log.d(TAG, "setInteractive: $interactive")
+            this.isInteractive = interactive
+        }
+    }
+
+    /**
+     * Check if the terminal is interactive.
+     *
+     * @return true if touch events are processed, false if disabled
+     */
+    fun isInteractive(): Boolean = isInteractive
 
     /**
      * Animate the bottom offset to a target value.

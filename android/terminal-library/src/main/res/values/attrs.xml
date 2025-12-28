@@ -3,5 +3,11 @@
     <declare-styleable name="GhosttyGLSurfaceView">
         <!-- Initial font size in pixels or sp/dp dimensions -->
         <attr name="initialFontSize" format="dimension" />
+        <!-- Minimum font size in pixels or sp/dp dimensions (default: 8px) -->
+        <attr name="minFontSize" format="dimension" />
+        <!-- Maximum font size in pixels or sp/dp dimensions (default: 96px) -->
+        <attr name="maxFontSize" format="dimension" />
+        <!-- Whether the terminal is interactive (responds to touch/input). Default: true -->
+        <attr name="interactive" format="boolean" />
     </declare-styleable>
 </resources>
