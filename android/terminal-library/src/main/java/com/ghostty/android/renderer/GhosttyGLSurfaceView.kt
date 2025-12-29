@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.opengl.GLSurfaceView
 import android.util.AttributeSet
 import android.util.Log
+import android.util.TypedValue
 import android.view.Choreographer
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -828,13 +829,32 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     fun setFontSize(fontSize: Float) {
         val clampedSize = fontSize.coerceIn(minFontSize, maxFontSize)
         if (kotlin.math.abs(clampedSize - currentFontSize) > 0.1f) {
-            Log.i(TAG, "setFontSize: $currentFontSize -> $clampedSize")
+            Log.i(TAG, "setFontSize: $currentFontSize -> $clampedSize px")
             currentFontSize = clampedSize
             queueEvent {
                 renderer.setFontSize(currentFontSize.toInt())
                 requestRender()
             }
         }
+    }
+
+    /**
+     * Set the font size using scaled pixels (SP).
+     *
+     * SP values scale with the user's font size preference (accessibility).
+     * The SP value is converted to pixels internally using the display metrics.
+     * The resulting pixel size will be clamped to the configured min/max bounds.
+     *
+     * @param fontSizeSp Font size in scaled pixels (SP)
+     */
+    fun setFontSizeSp(fontSizeSp: Float) {
+        val pixelSize = android.util.TypedValue.applyDimension(
+            android.util.TypedValue.COMPLEX_UNIT_SP,
+            fontSizeSp,
+            context.resources.displayMetrics
+        )
+        Log.d(TAG, "setFontSizeSp: ${fontSizeSp}sp -> ${pixelSize}px")
+        setFontSize(pixelSize)
     }
 
     /**
