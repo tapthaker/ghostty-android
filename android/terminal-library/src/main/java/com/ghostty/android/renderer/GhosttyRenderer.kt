@@ -13,12 +13,20 @@ import javax.microedition.khronos.opengles.GL10
  * all rendering operations to the native Zig renderer via JNI.
  *
  * @param context Android context for accessing display metrics
- * @param initialFontSize Initial font size in pixels (0 = use default)
+ * @param initialFontSize Initial font size in pixels. Required - caller must provide a valid size.
  */
 class GhosttyRenderer(
     private val context: Context,
-    private val initialFontSize: Int = 0
+    initialFontSize: Int
 ) : GLSurfaceView.Renderer {
+
+    // Font size to use when surface is created. Can be updated before surface is ready
+    // via setPendingFontSize(). Once surface is created, use setFontSize() instead.
+    private var pendingFontSize: Int = initialFontSize
+
+    // Track last grid size to avoid duplicate callbacks
+    private var lastGridCols: Int = 0
+    private var lastGridRows: Int = 0
 
     /**
      * Native handle for this renderer instance.
@@ -82,6 +90,18 @@ class GhosttyRenderer(
     }
 
     /**
+     * Set the font size to use when the surface is created.
+     * Must be called BEFORE the surface is ready (before onSurfaceChanged runs).
+     * After surface is ready, use setFontSize() instead.
+     *
+     * @param fontSize Font size in pixels
+     */
+    fun setPendingFontSize(fontSize: Int) {
+        Log.d(TAG, "setPendingFontSize: $fontSize")
+        this.pendingFontSize = fontSize
+    }
+
+    /**
      * Called when the OpenGL surface is created.
      *
      * This is called on the GL thread when the surface is first created,
@@ -114,10 +134,10 @@ class GhosttyRenderer(
         val displayMetrics = context.resources.displayMetrics
         val dpi = displayMetrics.densityDpi // This is an integer DPI value
 
-        Log.d(TAG, "onSurfaceChanged: ${width}x${height} at $dpi DPI, initial font size: $initialFontSize")
+        Log.d(TAG, "onSurfaceChanged: ${width}x${height} at $dpi DPI, font size: $pendingFontSize")
 
         try {
-            nativeOnSurfaceChanged(width, height, dpi, initialFontSize)
+            nativeOnSurfaceChanged(width, height, dpi, pendingFontSize)
 
             // Get grid size and notify callback
             val gridSize = getGridSize()
@@ -125,6 +145,9 @@ class GhosttyRenderer(
             val rows = gridSize[1]
             if (cols > 0 && rows > 0) {
                 Log.d(TAG, "Surface ready with grid size: ${cols}x${rows}")
+                // Update tracking and notify callback
+                lastGridCols = cols
+                lastGridRows = rows
                 onSurfaceChangedCallback?.invoke(cols, rows)
             }
         } catch (e: Exception) {
@@ -203,6 +226,8 @@ class GhosttyRenderer(
      * Update the font size dynamically.
      *
      * This will rebuild the font atlas and update the renderer.
+     * After font size changes, the grid dimensions change, so we notify
+     * via the onSurfaceChangedCallback.
      *
      * @param fontSize Font size in pixels
      */
@@ -211,6 +236,22 @@ class GhosttyRenderer(
 
         try {
             nativeSetFontSize(fontSize)
+
+            // Font size change affects grid dimensions - notify callback
+            val gridSize = getGridSize()
+            val cols = gridSize[0]
+            val rows = gridSize[1]
+            if (cols > 0 && rows > 0) {
+                // Skip callback if grid size hasn't changed (avoids duplicate resize events)
+                if (cols == lastGridCols && rows == lastGridRows) {
+                    Log.d(TAG, "Font size set, grid unchanged: ${cols}x${rows} - skipping callback")
+                    return
+                }
+                Log.d(TAG, "Font size changed, new grid: ${cols}x${rows}")
+                lastGridCols = cols
+                lastGridRows = rows
+                onSurfaceChangedCallback?.invoke(cols, rows)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeSetFontSize", e)
         }

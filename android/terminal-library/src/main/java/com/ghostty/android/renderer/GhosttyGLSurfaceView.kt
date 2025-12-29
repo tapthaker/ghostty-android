@@ -374,9 +374,8 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         setZOrderOnTop(true)
 
         // Create and set the renderer (pass context for DPI access and initial font size)
-        // Pass 0 if using default font size, otherwise pass the resolved font size as int
-        val rendererFontSize = if (resolvedFontSize > 0f) resolvedFontSize.toInt() else 0
-        renderer = GhosttyRenderer(context, rendererFontSize)
+        // Always pass a valid font size (use currentFontSize which defaults to DEFAULT_FONT_SIZE)
+        renderer = GhosttyRenderer(context, currentFontSize.toInt())
         setRenderer(renderer)
 
         // Set up surface change callback to notify listener on main thread
@@ -824,6 +823,9 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
      * The size will be clamped to the configured min/max bounds.
      * This triggers a re-render with the new font size.
      *
+     * If called before the surface is ready, this also updates the pending font size
+     * on the renderer, ensuring the correct size is used when the surface is created.
+     *
      * @param fontSize Font size in pixels
      */
     fun setFontSize(fontSize: Float) {
@@ -831,6 +833,12 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         if (kotlin.math.abs(clampedSize - currentFontSize) > 0.1f) {
             Log.i(TAG, "setFontSize: $currentFontSize -> $clampedSize px")
             currentFontSize = clampedSize
+
+            // Update pending font size on renderer (for when surface is created)
+            // This ensures correct grid size is used from the start
+            renderer.setPendingFontSize(currentFontSize.toInt())
+
+            // Also queue the font change for when surface is already ready
             queueEvent {
                 renderer.setFontSize(currentFontSize.toInt())
                 requestRender()

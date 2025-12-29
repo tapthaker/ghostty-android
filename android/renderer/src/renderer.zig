@@ -481,10 +481,15 @@ pub fn resize(self: *Self, width: u32, height: u32) !void {
     const cell_width = @as(u32, @intFromFloat(self.uniforms.cell_size[0]));
     const cell_height = @as(u32, @intFromFloat(self.uniforms.cell_size[1]));
 
+    // Get viewport padding and subtract from screen size for accurate grid calculation
+    const padding = self.font_system.getViewportPadding();
+    const usable_width = width -| padding.right;
+    const usable_height = height -| padding.bottom;
+
     // Use GridCalculator for proper grid dimension calculation
     const grid = font_metrics.GridCalculator.calculate(
-        width,
-        height,
+        usable_width,
+        usable_height,
         cell_width,
         cell_height,
         24,  // min_cols - reduced for mobile screens
@@ -716,9 +721,14 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
     const new_cell_width = @as(u32, @intFromFloat(cell_size[0]));
     const new_cell_height = @as(u32, @intFromFloat(cell_size[1]));
 
+    // Get updated padding and subtract from screen size for accurate grid calculation
+    const padding = self.font_system.getViewportPadding();
+    const usable_width = self.width -| padding.right;
+    const usable_height = self.height -| padding.bottom;
+
     const grid = font_metrics.GridCalculator.calculate(
-        self.width,
-        self.height,
+        usable_width,
+        usable_height,
         new_cell_width,
         new_cell_height,
         80,  // min_cols
