@@ -86,6 +86,7 @@ const RendererState = struct {
     initialized: bool = false,
     surface_sized: bool = false, // Track if surface has been sized at least once
     initial_font_size: u32 = 0, // Initial font size in pixels (0 = use default)
+    current_font_size: u32 = 0, // Current font size in pixels (for change detection)
 };
 
 // Map of handle ID -> RendererState
@@ -337,14 +338,29 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceChang
             return;
         };
         state.initialized = true;
+        state.current_font_size = state.initial_font_size; // Track initial font size
 
         log.info("Renderer initialized successfully for handle {d}", .{handle});
         log.info("Viewport set to {d}x{d}", .{ width, height });
         return; // Don't resize on first init - we just initialized with correct size!
     }
 
-    // Only resize if dimensions actually changed
+    // Handle font size changes and dimension changes
     if (state.renderer) |*renderer| {
+        // Check font size change FIRST - updateFontSize recalculates grid internally
+        if (font_size_u32 > 0 and font_size_u32 != state.current_font_size) {
+            log.info("Font size changed for handle {d}: {d}px -> {d}px", .{ handle, state.current_font_size, font_size_u32 });
+            renderer.updateFontSize(font_size_u32) catch |err| {
+                log.err("Failed to update font size: {}", .{err});
+                return;
+            };
+            state.current_font_size = font_size_u32;
+            log.info("Font size updated to {d}px, grid recalculated", .{font_size_u32});
+            // Font size change also updates the grid, so we're done
+            return;
+        }
+
+        // Check if dimensions changed (orientation change, etc.)
         const current_size = .{ .width = renderer.width, .height = renderer.height };
         const new_size = .{ .width = @as(u32, @intCast(width)), .height = @as(u32, @intCast(height)) };
 
@@ -356,7 +372,7 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeOnSurfaceChang
             };
             log.info("Renderer resized to {d}x{d}", .{ width, height });
         } else {
-            log.debug("Surface dimensions unchanged, skipping resize", .{});
+            log.debug("Surface dimensions and font size unchanged, skipping update", .{});
         }
     }
 

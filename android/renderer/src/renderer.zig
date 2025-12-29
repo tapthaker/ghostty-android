@@ -731,8 +731,8 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
         usable_height,
         new_cell_width,
         new_cell_height,
-        80,  // min_cols
-        24   // min_rows
+        24,  // min_cols - reduced for mobile screens (same as init/resize)
+        16   // min_rows - reduced for mobile screens (same as init/resize)
     );
 
     // Only resize terminal if dimensions actually changed

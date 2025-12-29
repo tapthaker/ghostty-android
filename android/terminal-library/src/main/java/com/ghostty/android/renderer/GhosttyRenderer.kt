@@ -28,6 +28,11 @@ class GhosttyRenderer(
     private var lastGridCols: Int = 0
     private var lastGridRows: Int = 0
 
+    // Store last surface dimensions for font size change recalculation
+    private var lastSurfaceWidth: Int = 0
+    private var lastSurfaceHeight: Int = 0
+    private var lastDpi: Int = 0
+
     /**
      * Native handle for this renderer instance.
      * Each GhosttyRenderer has its own native state, allowing multiple
@@ -136,6 +141,11 @@ class GhosttyRenderer(
 
         Log.d(TAG, "onSurfaceChanged: ${width}x${height} at $dpi DPI, font size: $pendingFontSize")
 
+        // Store dimensions for later use (e.g., font size changes)
+        lastSurfaceWidth = width
+        lastSurfaceHeight = height
+        lastDpi = dpi
+
         try {
             nativeOnSurfaceChanged(width, height, dpi, pendingFontSize)
 
@@ -234,10 +244,19 @@ class GhosttyRenderer(
     fun setFontSize(fontSize: Int) {
         Log.i(TAG, "setFontSize: $fontSize")
 
-        try {
-            nativeSetFontSize(fontSize)
+        // Need surface dimensions to recalculate grid
+        if (lastSurfaceWidth == 0 || lastSurfaceHeight == 0) {
+            Log.w(TAG, "setFontSize called before surface is ready, updating pending font size")
+            pendingFontSize = fontSize
+            return
+        }
 
-            // Font size change affects grid dimensions - notify callback
+        try {
+            // Call nativeOnSurfaceChanged with new font size to trigger full recalculation
+            // This ensures grid dimensions are updated based on new font metrics
+            nativeOnSurfaceChanged(lastSurfaceWidth, lastSurfaceHeight, lastDpi, fontSize)
+
+            // Get the new grid size after recalculation
             val gridSize = getGridSize()
             val cols = gridSize[0]
             val rows = gridSize[1]
@@ -253,7 +272,7 @@ class GhosttyRenderer(
                 onSurfaceChangedCallback?.invoke(cols, rows)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error in nativeSetFontSize", e)
+            Log.e(TAG, "Error in setFontSize", e)
         }
     }
 
