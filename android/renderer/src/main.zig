@@ -753,6 +753,37 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeScrollToBottom
     }
 }
 
+/// Scroll viewport to an absolute row offset
+/// Row 0 is the top of scrollback, and increases towards the active area
+/// Use getViewportOffset() to get the current offset for later restoration
+/// Java signature: void nativeScrollToViewportOffset(int row)
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeScrollToViewportOffset(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    row: c.jint,
+) void {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
+        log.warn("Attempted to scroll to viewport offset before renderer initialized", .{});
+        return;
+    }
+
+    if (state.renderer) |*renderer| {
+        const row_usize: usize = if (row < 0) 0 else @intCast(row);
+        renderer.scrollToViewportOffset(row_usize);
+        log.debug("Scrolled viewport to row {}", .{row_usize});
+    }
+}
+
 /// Set the visual scroll pixel offset for smooth sub-row scrolling
 /// This offset is applied in the shaders to shift content smoothly
 /// between row boundaries during scroll animations.

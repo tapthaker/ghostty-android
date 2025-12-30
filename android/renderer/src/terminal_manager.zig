@@ -151,6 +151,15 @@ pub fn scrollToBottom(self: *TerminalManager) void {
     log.debug("Scrolled viewport to bottom (active area)", .{});
 }
 
+/// Scroll viewport to an absolute row offset
+/// Row 0 is the top of scrollback, and increases towards the active area
+/// Use getViewportOffset() to get the current offset for later restoration
+pub fn scrollToViewportOffset(self: *TerminalManager, row: usize) void {
+    const screen = self.terminal.screens.get(.primary).?;
+    screen.pages.scroll(.{ .row = row });
+    log.debug("Scrolled viewport to row {}", .{row});
+}
+
 /// Update render state from terminal - call before extracting cursor style
 pub fn updateRenderState(self: *TerminalManager) !void {
     try self.render_state.update(self.allocator, &self.terminal);

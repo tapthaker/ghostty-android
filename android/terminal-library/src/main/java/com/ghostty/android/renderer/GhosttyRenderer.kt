@@ -75,6 +75,7 @@ class GhosttyRenderer(
     private external fun nativeIsViewportAtBottom(): Boolean
     private external fun nativeGetViewportOffset(): Int
     private external fun nativeScrollToBottom()
+    private external fun nativeScrollToViewportOffset(row: Int)
     private external fun nativeSetScrollPixelOffset(offset: Float)
 
     // Grid size native method - returns [cols, rows]
@@ -407,6 +408,25 @@ class GhosttyRenderer(
             nativeSetScrollPixelOffset(0f)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeScrollToBottom", e)
+        }
+    }
+
+    /**
+     * Scroll viewport to an absolute row offset.
+     * Also resets the visual scroll pixel offset to 0.
+     *
+     * Row 0 is the top of scrollback, and increases towards the active area.
+     * Use getViewportOffset() to get the current offset for later restoration.
+     *
+     * @param row The absolute row offset to scroll to (0 = top of scrollback)
+     */
+    fun scrollToViewportOffset(row: Int) {
+        try {
+            nativeScrollToViewportOffset(row)
+            // Reset the visual scroll pixel offset for clean position
+            nativeSetScrollPixelOffset(0f)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeScrollToViewportOffset", e)
         }
     }
 

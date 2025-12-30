@@ -1031,6 +1031,13 @@ pub fn scrollToBottom(self: *Self) void {
     self.terminal_manager.scrollToBottom();
 }
 
+/// Scroll viewport to an absolute row offset
+/// Row 0 is the top of scrollback, and increases towards the active area
+/// Use getViewportOffset() to get the current offset for later restoration
+pub fn scrollToViewportOffset(self: *Self, row: usize) void {
+    self.terminal_manager.scrollToViewportOffset(row);
+}
+
 // ============================================================================
 // Cursor State API (for future JNI binding)
 // ============================================================================
