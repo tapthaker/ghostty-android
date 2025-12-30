@@ -546,8 +546,13 @@ pub fn render(self: *Self) !void {
         self.last_frame_time = now;
     }
 
-    // Sync renderer state from terminal (extract cells and update GPU buffers)
-    try self.syncFromTerminal();
+    // Skip syncing during synchronized output mode (ESC[?2026h).
+    // This prevents partial/flickering frames during batched terminal updates.
+    // We still render the existing buffers to avoid visual freeze.
+    if (!self.terminal_manager.isSynchronizedOutputActive()) {
+        // Sync renderer state from terminal (extract cells and update GPU buffers)
+        try self.syncFromTerminal();
+    }
 
     // Sync FPS overlay to separate buffer (rendered with scroll_pixel_offset=0)
     try self.syncFpsOverlay();
@@ -940,9 +945,17 @@ pub fn syncFromTerminal(self: *Self) !void {
 }
 
 /// Process VT input and sync to renderer
+/// Respects synchronized output mode (ESC[?2026h/l) - only syncs when mode is inactive.
+/// This allows batched updates to complete before rendering.
 pub fn processTerminalInput(self: *Self, data: []const u8) !void {
     try self.terminal_manager.processInput(data);
-    try self.syncFromTerminal();
+
+    // Only sync after processing if synchronized output mode is not active.
+    // If the input contained ESC[?2026l (end sync), the mode will be off now,
+    // and we'll sync the complete batched state.
+    if (!self.terminal_manager.isSynchronizedOutputActive()) {
+        try self.syncFromTerminal();
+    }
 }
 
 // ============================================================================

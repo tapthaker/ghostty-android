@@ -3,6 +3,7 @@ package com.ghostty.android.testing
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.Environment
+import android.util.Base64
 import android.util.Log
 import android.view.View
 import com.ghostty.android.renderer.GhosttyRenderer
@@ -15,8 +16,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStreamReader
 
 /**
  * Test runner for executing visual regression tests.
@@ -71,6 +74,14 @@ class TestRunner(
             // Clear the terminal first
             renderer.processInput("\u001B[2J\u001B[H")
 
+            // Check if this is a replay test
+            if (testCase.isReplayTest && testCase.replayAssetPath != null) {
+                // Run replay from asset
+                val replayResult = runReplayFromAsset(testCase.replayAssetPath, testCase.replayDelayMs)
+                Log.i(TAG, "TEST_READY:${testCase.id} (replay)")
+                return replayResult.copy(testCase = testCase)
+            }
+
             // Inject the ANSI sequence immediately
             renderer.processInput(testCase.ansiSequence)
 
@@ -105,6 +116,103 @@ class TestRunner(
         }
     }
 
+
+    /**
+     * Run a replay test from an asset file.
+     *
+     * Replay files contain base64-encoded terminal messages, one per line.
+     * Lines starting with # are comments.
+     *
+     * @param assetPath Path to the replay file in assets (e.g., "replay/dab597.log")
+     * @param delayMs Delay between messages (0 for instant replay)
+     * @return The test result
+     */
+    suspend fun runReplayFromAsset(assetPath: String, delayMs: Long = 0): TestResult {
+        val testId = "replay_${assetPath.replace("/", "_").replace(".", "_")}"
+        Log.i(TAG, "REPLAY_START:$testId from asset:$assetPath")
+
+        val startTime = System.currentTimeMillis()
+
+        return try {
+            // Scroll to bottom
+            renderer.scrollToBottom()
+
+            // Clear the terminal first
+            renderer.processInput("\u001B[2J\u001B[H")
+
+            // Read and replay the file
+            val inputStream = context.assets.open(assetPath)
+            val reader = BufferedReader(InputStreamReader(inputStream))
+
+            var lineNumber = 0
+            var messagesProcessed = 0
+
+            reader.useLines { lines ->
+                lines.forEach { line ->
+                    lineNumber++
+                    val trimmed = line.trim()
+
+                    // Skip empty lines and comments
+                    if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                        return@forEach
+                    }
+
+                    try {
+                        // Decode base64
+                        val decoded = Base64.decode(trimmed, Base64.DEFAULT)
+                        val content = String(decoded, Charsets.UTF_8)
+
+                        // Inject into terminal
+                        renderer.processInput(content)
+                        messagesProcessed++
+
+                        Log.d(TAG, "REPLAY:$testId msg=$messagesProcessed bytes=${decoded.size}")
+
+                        // Optional delay between messages
+                        if (delayMs > 0) {
+                            delay(delayMs)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "REPLAY:$testId line=$lineNumber decode error: ${e.message}")
+                    }
+                }
+            }
+
+            Log.i(TAG, "REPLAY_COMPLETE:$testId messages=$messagesProcessed")
+
+            val endTime = System.currentTimeMillis()
+            val duration = endTime - startTime
+
+            TestResult(
+                testCase = TestCase(
+                    id = testId,
+                    description = "Replay from $assetPath",
+                    ansiSequence = "",
+                    tags = listOf("replay", "asset")
+                ),
+                status = TestStatus.PASSED,
+                durationMs = duration,
+                message = "Replayed $messagesProcessed messages"
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Replay failed: $assetPath", e)
+            val endTime = System.currentTimeMillis()
+            val duration = endTime - startTime
+
+            TestResult(
+                testCase = TestCase(
+                    id = testId,
+                    description = "Replay from $assetPath",
+                    ansiSequence = "",
+                    tags = listOf("replay", "asset")
+                ),
+                status = TestStatus.FAILED,
+                durationMs = duration,
+                message = "Replay failed: ${e.message}",
+                error = e
+            )
+        }
+    }
 
     /**
      * Clear test results.

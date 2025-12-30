@@ -86,7 +86,8 @@ pub fn extractCells(
     while (row < rows) : (row += 1) {
         var col: usize = 0;
         while (col < cols) : (col += 1) {
-            // Pin to the viewport coordinates (tests write to viewport)
+            // Pin to the viewport coordinates
+            // Note: viewport should follow active area via scroll(.active) after output
             const pin = screen.pages.pin(.{ .viewport = .{
                 .x = @intCast(col),
                 .y = @intCast(row),

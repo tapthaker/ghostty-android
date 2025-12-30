@@ -23,8 +23,17 @@ data class TestCase(
     val referenceImage: String? = null,
 
     /** Optional: Tags for categorization (e.g., "color", "cursor", "vttest") */
-    val tags: List<String> = emptyList()
+    val tags: List<String> = emptyList(),
+
+    /** Optional: Asset path for replay tests (base64-encoded messages, one per line) */
+    val replayAssetPath: String? = null,
+
+    /** Optional: Delay between replay messages in ms (0 = instant) */
+    val replayDelayMs: Long = 0
 ) {
+    /** Check if this is a replay test */
+    val isReplayTest: Boolean get() = replayAssetPath != null
+
     override fun toString(): String = "TestCase($id: $description)"
 }
 
@@ -39,6 +48,8 @@ class TestCaseBuilder(
     private var termSize: Pair<Int, Int> = Pair(80, 24)
     private var refImage: String? = null
     private val testTags = mutableListOf<String>()
+    private var assetPath: String? = null
+    private var delayMs: Long = 0
 
     fun ansi(sequence: String): TestCaseBuilder {
         sequences.add(sequence)
@@ -60,13 +71,22 @@ class TestCaseBuilder(
         return this
     }
 
+    /** Set asset path for replay test */
+    fun replayAsset(path: String, delayMs: Long = 0): TestCaseBuilder {
+        assetPath = path
+        this.delayMs = delayMs
+        return this
+    }
+
     fun build(): TestCase = TestCase(
         id = id,
         description = description,
         ansiSequence = sequences.joinToString(""),
         terminalSize = termSize,
         referenceImage = refImage,
-        tags = testTags
+        tags = testTags,
+        replayAssetPath = assetPath,
+        replayDelayMs = delayMs
     )
 }
 

@@ -189,3 +189,10 @@ pub fn getContentRows(self: *TerminalManager) usize {
     // cursor.y is 0-indexed, so add 1 for total rows with content
     return @as(usize, screen.cursor.y) + 1;
 }
+
+/// Check if synchronized output mode is active (mode 2026).
+/// When active, the terminal is buffering changes and rendering should be deferred
+/// until the mode is disabled (ESC[?2026l).
+pub fn isSynchronizedOutputActive(self: *TerminalManager) bool {
+    return self.terminal.modes.get(.synchronized_output);
+}
