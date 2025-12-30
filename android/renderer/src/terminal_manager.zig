@@ -196,3 +196,159 @@ pub fn getContentRows(self: *TerminalManager) usize {
 pub fn isSynchronizedOutputActive(self: *TerminalManager) bool {
     return self.terminal.modes.get(.synchronized_output);
 }
+
+// =============================================================================
+// Selection API
+// =============================================================================
+
+const Selection = ghostty_vt.Selection;
+const point = ghostty_vt.point;
+
+/// Selection bounds in viewport coordinates
+pub const SelectionBounds = struct {
+    start_col: u16,
+    start_row: u16,
+    end_col: u16,
+    end_row: u16,
+};
+
+/// Start a new selection at the given viewport coordinates.
+/// This creates an initial selection with start and end at the same point.
+pub fn startSelection(self: *TerminalManager, col: u16, row: u16) !void {
+    var screen = self.terminal.screens.get(.primary).?;
+
+    // Convert viewport coordinates to a Pin
+    const pt = point.Point{ .viewport = .{ .x = col, .y = row } };
+    const pin = screen.pages.pin(pt) orelse {
+        log.warn("startSelection: invalid coordinates ({}, {})", .{ col, row });
+        return;
+    };
+
+    // Create selection with same start and end point
+    const sel = Selection.init(pin, pin, false);
+    try screen.select(sel);
+
+    log.debug("Started selection at ({}, {})", .{ col, row });
+}
+
+/// Update the end point of the current selection.
+/// If no selection exists, this is a no-op.
+pub fn updateSelection(self: *TerminalManager, col: u16, row: u16) !void {
+    var screen = self.terminal.screens.get(.primary).?;
+
+    // Get current selection
+    var sel = screen.selection orelse return;
+
+    // Convert viewport coordinates to a Pin
+    const pt = point.Point{ .viewport = .{ .x = col, .y = row } };
+    const pin = screen.pages.pin(pt) orelse {
+        log.warn("updateSelection: invalid coordinates ({}, {})", .{ col, row });
+        return;
+    };
+
+    // Update the end point
+    sel.endPtr().* = pin;
+    screen.dirty.selection = true;
+
+    log.debug("Updated selection end to ({}, {})", .{ col, row });
+}
+
+/// Clear the current selection.
+pub fn clearSelection(self: *TerminalManager) void {
+    var screen = self.terminal.screens.get(.primary).?;
+    screen.clearSelection();
+    log.debug("Cleared selection", .{});
+}
+
+/// Check if there is an active selection.
+pub fn hasSelection(self: *TerminalManager) bool {
+    const screen = self.terminal.screens.get(.primary).?;
+    return screen.selection != null;
+}
+
+/// Get the selected text as a string.
+/// Returns null if no selection exists.
+/// Caller owns the returned memory and must free it with the allocator.
+pub fn getSelectionText(self: *TerminalManager) !?[:0]const u8 {
+    var screen = self.terminal.screens.get(.primary).?;
+
+    const sel = screen.selection orelse return null;
+
+    return try screen.selectionString(self.allocator, .{
+        .sel = sel,
+        .trim = true,
+    });
+}
+
+/// Get the selection bounds in viewport coordinates.
+/// Returns null if no selection exists.
+pub fn getSelectionBounds(self: *TerminalManager) ?SelectionBounds {
+    var screen = self.terminal.screens.get(.primary).?;
+
+    const sel = screen.selection orelse return null;
+
+    // Get ordered bounds (top-left and bottom-right)
+    const tl = sel.topLeft(screen);
+    const br = sel.bottomRight(screen);
+
+    // Convert pins to viewport coordinates
+    const tl_pt = screen.pages.pointFromPin(.viewport, tl) orelse return null;
+    const br_pt = screen.pages.pointFromPin(.viewport, br) orelse return null;
+
+    return .{
+        .start_col = tl.x,
+        .start_row = @intCast(tl_pt.coord().y),
+        .end_col = br.x,
+        .end_row = @intCast(br_pt.coord().y),
+    };
+}
+
+// =============================================================================
+// Hyperlink API
+// =============================================================================
+
+/// Get the hyperlink URI at the given viewport coordinates.
+/// Returns null if no hyperlink exists at the given position.
+/// Caller owns the returned memory and must free it with the allocator.
+pub fn getHyperlinkAtCell(self: *TerminalManager, col: u16, row: u16) !?[]const u8 {
+    // Update render state to ensure it's current
+    try self.updateRenderState();
+
+    // Check if we have row data
+    const row_slice = self.render_state.row_data.slice();
+    const row_pins = row_slice.items(.pin);
+
+    if (row >= row_pins.len) {
+        log.debug("getHyperlinkAtCell: row {} out of range (max {})", .{ row, row_pins.len });
+        return null;
+    }
+
+    // Get the page for this row
+    const page_ptr = &row_pins[row].node.data;
+
+    // Get the row and cell at the position
+    const rac = page_ptr.getRowAndCell(col, row);
+
+    // Check if the cell has a hyperlink
+    if (!rac.cell.hyperlink) {
+        return null;
+    }
+
+    // Look up the hyperlink ID
+    const link_id = page_ptr.lookupHyperlink(rac.cell) orelse {
+        log.warn("getHyperlinkAtCell: cell has hyperlink flag but no ID", .{});
+        return null;
+    };
+
+    // Get the hyperlink entry from the set
+    const link = page_ptr.hyperlink_set.get(page_ptr.memory, link_id);
+
+    // Extract the URI string
+    const uri = link.uri.slice(page_ptr.memory);
+
+    // Duplicate the URI string so caller owns it
+    const result = try self.allocator.dupe(u8, uri);
+    log.debug("Found hyperlink at ({}, {}): {s}", .{ col, row, result });
+
+    return result;
+}

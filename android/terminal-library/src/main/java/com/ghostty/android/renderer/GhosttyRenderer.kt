@@ -83,6 +83,18 @@ class GhosttyRenderer(
     // FPS display native method
     private external fun nativeSetShowFps(show: Boolean)
 
+    // Selection native methods
+    private external fun nativeGetCellSize(): FloatArray
+    private external fun nativeStartSelection(col: Int, row: Int)
+    private external fun nativeUpdateSelection(col: Int, row: Int)
+    private external fun nativeClearSelection()
+    private external fun nativeHasSelection(): Boolean
+    private external fun nativeGetSelectionText(): String?
+    private external fun nativeGetSelectionBounds(): IntArray?
+
+    // Hyperlink native methods
+    private external fun nativeGetHyperlinkAtCell(col: Int, row: Int): String?
+
     // Callback invoked after surface changes with new grid size
     private var onSurfaceChangedCallback: ((cols: Int, rows: Int) -> Unit)? = null
 
@@ -453,6 +465,125 @@ class GhosttyRenderer(
             nativeSetShowFps(show)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeSetShowFps", e)
+        }
+    }
+
+    // ============================================================================
+    // Selection API
+    // ============================================================================
+
+    /**
+     * Get the cell size for coordinate conversion.
+     *
+     * @return FloatArray of [cellWidth, cellHeight] in pixels, or [0, 0] if not available
+     */
+    fun getCellSize(): FloatArray {
+        return try {
+            nativeGetCellSize()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeGetCellSize", e)
+            floatArrayOf(0f, 0f)
+        }
+    }
+
+    /**
+     * Start a new selection at the given cell coordinates.
+     *
+     * @param col Column index (0-based)
+     * @param row Row index (0-based, in viewport coordinates)
+     */
+    fun startSelection(col: Int, row: Int) {
+        try {
+            nativeStartSelection(col, row)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeStartSelection", e)
+        }
+    }
+
+    /**
+     * Update the end point of the current selection.
+     *
+     * @param col Column index (0-based)
+     * @param row Row index (0-based, in viewport coordinates)
+     */
+    fun updateSelection(col: Int, row: Int) {
+        try {
+            nativeUpdateSelection(col, row)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeUpdateSelection", e)
+        }
+    }
+
+    /**
+     * Clear the current selection.
+     */
+    fun clearSelection() {
+        try {
+            nativeClearSelection()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeClearSelection", e)
+        }
+    }
+
+    /**
+     * Check if there is an active selection.
+     *
+     * @return true if a selection exists, false otherwise
+     */
+    fun hasSelection(): Boolean {
+        return try {
+            nativeHasSelection()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeHasSelection", e)
+            false
+        }
+    }
+
+    /**
+     * Get the selected text.
+     *
+     * @return The selected text, or null if no selection exists
+     */
+    fun getSelectionText(): String? {
+        return try {
+            nativeGetSelectionText()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeGetSelectionText", e)
+            null
+        }
+    }
+
+    /**
+     * Get the selection bounds in viewport coordinates.
+     *
+     * @return IntArray of [startCol, startRow, endCol, endRow], or null if no selection
+     */
+    fun getSelectionBounds(): IntArray? {
+        return try {
+            nativeGetSelectionBounds()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeGetSelectionBounds", e)
+            null
+        }
+    }
+
+    // ============================================================================
+    // Hyperlink API
+    // ============================================================================
+
+    /**
+     * Get the hyperlink URI at the given cell coordinates.
+     *
+     * @param col Column index (0-based)
+     * @param row Row index (0-based, in viewport coordinates)
+     * @return The hyperlink URI, or null if no hyperlink at that position
+     */
+    fun getHyperlinkAtCell(col: Int, row: Int): String? {
+        return try {
+            nativeGetHyperlinkAtCell(col, row)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeGetHyperlinkAtCell", e)
+            null
         }
     }
 }

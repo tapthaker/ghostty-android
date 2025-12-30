@@ -70,6 +70,22 @@ interface TerminalEventListener {
      * Called when user performs a single-finger double-tap gesture.
      */
     fun onDoubleTap() {}
+
+    /**
+     * Called when user completes a text selection.
+     * Consumer should handle the selected text (copy to clipboard, show menu, etc.)
+     *
+     * @param text The selected text content
+     */
+    fun onTextSelected(text: String) {}
+
+    /**
+     * Called when user taps on a hyperlink (OSC 8).
+     * Consumer should handle the link (open browser, show confirmation, etc.)
+     *
+     * @param uri The hyperlink URI
+     */
+    fun onHyperlinkClicked(uri: String) {}
 }
 
 /**
@@ -167,6 +183,11 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     private val bottomOffsetInterpolator = DecelerateInterpolator()
     private var lastBottomOffsetExpanded = false  // Track last state for callback
     private var shouldScrollContentWithOverlay = true  // Whether to scroll content when overlay expands
+
+    // Selection mode state
+    private var isSelectionMode = false
+    private var selectionStartX = 0f
+    private var selectionStartY = 0f
 
     // Choreographer for driving fling animation at vsync
     private val choreographer = Choreographer.getInstance()
@@ -569,6 +590,48 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 eventListener?.onDoubleTap()
                 return true
             }
+
+            override fun onLongPress(e: MotionEvent) {
+                if (!isInteractive) return
+
+                // Convert touch coordinates to cell coordinates
+                val cell = pixelToCell(e.x, e.y) ?: return
+
+                Log.d(TAG, "Long press at cell (${cell.first}, ${cell.second})")
+
+                // Start selection mode
+                isSelectionMode = true
+                selectionStartX = e.x
+                selectionStartY = e.y
+
+                queueEvent {
+                    renderer.startSelection(cell.first, cell.second)
+                    requestRender()
+                }
+
+                // Haptic feedback
+                performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            }
+
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                if (!isInteractive) return false
+
+                // Convert touch coordinates to cell coordinates
+                val cell = pixelToCell(e.x, e.y) ?: return false
+
+                // Check for hyperlink at this cell
+                queueEvent {
+                    val uri = renderer.getHyperlinkAtCell(cell.first, cell.second)
+                    if (uri != null) {
+                        Log.d(TAG, "Hyperlink tapped: $uri")
+                        post {
+                            eventListener?.onHyperlinkClicked(uri)
+                        }
+                    }
+                }
+
+                return true
+            }
         })
 
         // Initialize OverScroller for fling physics
@@ -681,6 +744,29 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     }
 
     /**
+     * Convert pixel coordinates to cell coordinates.
+     *
+     * @param pixelX X coordinate in pixels
+     * @param pixelY Y coordinate in pixels
+     * @return Pair of (col, row) or null if out of bounds
+     */
+    private fun pixelToCell(pixelX: Float, pixelY: Float): Pair<Int, Int>? {
+        val cellSize = renderer.getCellSize()
+        val cellWidth = cellSize[0]
+        val cellHeight = cellSize[1]
+
+        if (cellWidth <= 0 || cellHeight <= 0) return null
+
+        val col = (pixelX / cellWidth).toInt()
+        val row = ((pixelY + scrollPixelOffset) / cellHeight).toInt()
+
+        val gridSize = renderer.getGridSize()
+        if (col < 0 || col >= gridSize[0] || row < 0) return null
+
+        return Pair(col, row)
+    }
+
+    /**
      * Handle pause lifecycle event.
      *
      * Called by the parent activity/fragment.
@@ -711,20 +797,41 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
             return false
         }
 
+        // Handle selection mode drag
+        if (isSelectionMode && event.actionMasked == MotionEvent.ACTION_MOVE) {
+            val cell = pixelToCell(event.x, event.y)
+            if (cell != null) {
+                queueEvent {
+                    renderer.updateSelection(cell.first, cell.second)
+                    requestRender()
+                }
+            }
+            return true
+        }
+
         // Track two-finger gestures
         handleTwoFingerGesture(event)
 
         // Let scroll gesture detector handle the event
-        // Only process scroll if not in a two-finger gesture
-        val scrollHandled = if (!twoFingerGestureActive) {
+        // Only process scroll if not in a two-finger gesture and not in selection mode
+        val scrollHandled = if (!twoFingerGestureActive && !isSelectionMode) {
             gestureDetector.onTouchEvent(event)
-        } else {
+        } else if (!isSelectionMode) {
             false
+        } else {
+            // Still process gesture detector for selection mode (for onLongPress detection)
+            gestureDetector.onTouchEvent(event)
         }
 
         // Handle edge effect release and bottom offset snap on ACTION_UP or ACTION_CANCEL
         when (event.actionMasked) {
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                // Handle selection finalization
+                if (isSelectionMode) {
+                    finalizeSelection()
+                    isSelectionMode = false
+                }
+
                 // Handle bottom offset snap animation
                 if (maxBottomOffset > 0 && (bottomOffset > 0 || accumulatedBottomDrag != 0f)) {
                     // Snap to nearest: if past 50%, expand; otherwise collapse
@@ -751,6 +858,23 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         }
 
         return scrollHandled || true // Consume the event
+    }
+
+    /**
+     * Finalize the current selection and notify the listener.
+     */
+    private fun finalizeSelection() {
+        queueEvent {
+            val text = renderer.getSelectionText()
+            if (!text.isNullOrEmpty()) {
+                Log.d(TAG, "Selection finalized: ${text.length} chars")
+                post {
+                    eventListener?.onTextSelected(text)
+                }
+            }
+            renderer.clearSelection()
+            requestRender()
+        }
     }
 
     /**

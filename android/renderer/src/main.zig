@@ -850,6 +850,286 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetGridSize(
     return result;
 }
 
+// ============================================================================
+// Selection JNI Methods
+// ============================================================================
+
+/// Get the cell size for coordinate conversion
+/// Java signature: float[] nativeGetCellSize()
+/// Returns [cellWidth, cellHeight] array
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetCellSize(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) c.jfloatArray {
+    const handle = getNativeHandle(env, obj);
+    const env_vtable = env.*.?;
+
+    // Create a new float array of size 2
+    const result = env_vtable.*.NewFloatArray.?(env, 2);
+    if (result == null) {
+        log.err("Failed to create jfloatArray for cell size", .{});
+        return null;
+    }
+
+    var cell_size: [2]c.jfloat = .{ 0.0, 0.0 };
+
+    if (handle != 0) {
+        if (getRendererState(handle)) |state| {
+            if (state.initialized) {
+                if (state.renderer) |*renderer| {
+                    cell_size[0] = renderer.uniforms.cell_size[0];
+                    cell_size[1] = renderer.uniforms.cell_size[1];
+                }
+            }
+        }
+    }
+
+    env_vtable.*.SetFloatArrayRegion.?(env, result, 0, 2, &cell_size);
+    return result;
+}
+
+/// Start a new selection at the given cell coordinates
+/// Java signature: void nativeStartSelection(int col, int row)
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeStartSelection(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    col: c.jint,
+    row: c.jint,
+) void {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
+        log.warn("Attempted to start selection before renderer initialized", .{});
+        return;
+    }
+
+    if (state.renderer) |*renderer| {
+        renderer.terminal_manager.startSelection(@intCast(col), @intCast(row)) catch |err| {
+            log.err("Failed to start selection: {}", .{err});
+        };
+    }
+}
+
+/// Update the end point of the current selection
+/// Java signature: void nativeUpdateSelection(int col, int row)
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeUpdateSelection(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    col: c.jint,
+    row: c.jint,
+) void {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
+        return;
+    }
+
+    if (state.renderer) |*renderer| {
+        renderer.terminal_manager.updateSelection(@intCast(col), @intCast(row)) catch |err| {
+            log.err("Failed to update selection: {}", .{err});
+        };
+    }
+}
+
+/// Clear the current selection
+/// Java signature: void nativeClearSelection()
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeClearSelection(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) void {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
+        return;
+    }
+
+    if (state.renderer) |*renderer| {
+        renderer.terminal_manager.clearSelection();
+    }
+}
+
+/// Check if there is an active selection
+/// Java signature: boolean nativeHasSelection()
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeHasSelection(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) c.jboolean {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return c.JNI_FALSE;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return c.JNI_FALSE;
+    };
+
+    if (!state.initialized) {
+        return c.JNI_FALSE;
+    }
+
+    if (state.renderer) |*renderer| {
+        return if (renderer.terminal_manager.hasSelection()) c.JNI_TRUE else c.JNI_FALSE;
+    }
+
+    return c.JNI_FALSE;
+}
+
+/// Get the selected text
+/// Java signature: String nativeGetSelectionText()
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetSelectionText(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) c.jstring {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return null;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return null;
+    };
+
+    if (!state.initialized) {
+        return null;
+    }
+
+    if (state.renderer) |*renderer| {
+        const text = renderer.terminal_manager.getSelectionText() catch |err| {
+            log.err("Failed to get selection text: {}", .{err});
+            return null;
+        };
+
+        if (text) |txt| {
+            defer gpa.allocator().free(txt);
+            return jni.newJString(env, txt) catch |err| {
+                log.err("Failed to create JNI string for selection text: {}", .{err});
+                return null;
+            };
+        }
+    }
+
+    return null;
+}
+
+/// Get the selection bounds in viewport coordinates
+/// Java signature: int[] nativeGetSelectionBounds()
+/// Returns [startCol, startRow, endCol, endRow] or null if no selection
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetSelectionBounds(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) c.jintArray {
+    const handle = getNativeHandle(env, obj);
+    const env_vtable = env.*.?;
+
+    if (handle == 0) {
+        return null;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return null;
+    };
+
+    if (!state.initialized) {
+        return null;
+    }
+
+    if (state.renderer) |*renderer| {
+        const bounds = renderer.terminal_manager.getSelectionBounds() orelse {
+            return null;
+        };
+
+        // Create a new int array of size 4
+        const result = env_vtable.*.NewIntArray.?(env, 4);
+        if (result == null) {
+            log.err("Failed to create jintArray for selection bounds", .{});
+            return null;
+        }
+
+        var bounds_array: [4]c.jint = .{
+            @intCast(bounds.start_col),
+            @intCast(bounds.start_row),
+            @intCast(bounds.end_col),
+            @intCast(bounds.end_row),
+        };
+
+        env_vtable.*.SetIntArrayRegion.?(env, result, 0, 4, &bounds_array);
+        return result;
+    }
+
+    return null;
+}
+
+// ============================================================================
+// Hyperlink JNI Methods
+// ============================================================================
+
+/// Get the hyperlink URI at the given cell coordinates
+/// Java signature: String nativeGetHyperlinkAtCell(int col, int row)
+/// Returns the URI string or null if no hyperlink
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetHyperlinkAtCell(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    col: c.jint,
+    row: c.jint,
+) c.jstring {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return null;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return null;
+    };
+
+    if (!state.initialized) {
+        return null;
+    }
+
+    if (state.renderer) |*renderer| {
+        const uri = renderer.terminal_manager.getHyperlinkAtCell(@intCast(col), @intCast(row)) catch |err| {
+            log.err("Failed to get hyperlink: {}", .{err});
+            return null;
+        };
+
+        if (uri) |u| {
+            defer gpa.allocator().free(u);
+            return jni.newJString(env, u) catch |err| {
+                log.err("Failed to create JNI string for hyperlink URI: {}", .{err});
+                return null;
+            };
+        }
+    }
+
+    return null;
+}
+
 // Comptime test to ensure JNI function names are correct
 comptime {
     // This will cause a compile error if the function signatures don't match
@@ -873,4 +1153,14 @@ comptime {
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetShowFps;
     // Grid size
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetGridSize;
+    // Selection methods
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetCellSize;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeStartSelection;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeUpdateSelection;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeClearSelection;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeHasSelection;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetSelectionText;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetSelectionBounds;
+    // Hyperlink methods
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetHyperlinkAtCell;
 }

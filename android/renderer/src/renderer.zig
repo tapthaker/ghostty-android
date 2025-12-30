@@ -807,17 +807,47 @@ pub fn syncFromTerminal(self: *Self) !void {
     // Clear all backgrounds to default
     @memset(cell_bg_colors, 0);
 
+    // Get selection bounds for highlighting
+    const selection_bounds = self.terminal_manager.getSelectionBounds();
+
     // Process each cell
     for (cells) |cell| {
         const idx: usize = @as(usize, cell.row) * @as(usize, self.grid_cols) + @as(usize, cell.col);
 
-        // Pack background color (RGBA8)
-        cell_bg_colors[idx] = shaders.Uniforms.pack4u8(
-            cell.bg_color[0],
-            cell.bg_color[1],
-            cell.bg_color[2],
-            cell.bg_color[3],
-        );
+        // Check if cell is within selection
+        const is_selected = if (selection_bounds) |bounds| blk: {
+            // Check if cell row is within selection rows
+            if (cell.row < bounds.start_row or cell.row > bounds.end_row) {
+                break :blk false;
+            }
+            // For single-row selection
+            if (bounds.start_row == bounds.end_row) {
+                break :blk cell.col >= bounds.start_col and cell.col <= bounds.end_col;
+            }
+            // For first row of multi-row selection
+            if (cell.row == bounds.start_row) {
+                break :blk cell.col >= bounds.start_col;
+            }
+            // For last row of multi-row selection
+            if (cell.row == bounds.end_row) {
+                break :blk cell.col <= bounds.end_col;
+            }
+            // Middle rows are fully selected
+            break :blk true;
+        } else false;
+
+        // Pack background color (RGBA8) - use selection color if selected
+        if (is_selected) {
+            // Selection highlight color: semi-transparent blue
+            cell_bg_colors[idx] = shaders.Uniforms.pack4u8(100, 149, 237, 180);
+        } else {
+            cell_bg_colors[idx] = shaders.Uniforms.pack4u8(
+                cell.bg_color[0],
+                cell.bg_color[1],
+                cell.bg_color[2],
+                cell.bg_color[3],
+            );
+        }
 
         // Skip wide character continuation cells
         if (cell.is_wide_continuation) {
