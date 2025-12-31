@@ -957,6 +957,34 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
      */
     fun isBottomOffsetExpanded(): Boolean = maxBottomOffset > 0 && bottomOffset >= maxBottomOffset
 
+    /**
+     * Scroll to bottom if we're scrolled up while the keyboard overlay is active.
+     *
+     * Call this after content changes (e.g., after processInput) to ensure
+     * new content is visible when the keyboard is shown. When the user is
+     * scrolled up viewing history and new content arrives while the keyboard
+     * is visible, this will snap the viewport to show the latest content.
+     *
+     * This is a no-op if:
+     * - The viewport is already at the bottom
+     * - The keyboard overlay is not active (bottomOffset == 0)
+     */
+    fun scrollToBottomIfScrolledWithOverlay() {
+        // Only act if keyboard overlay is active
+        if (bottomOffset <= 0) return
+
+        queueEvent {
+            // Check if we're scrolled up (not at bottom)
+            if (!renderer.isViewportAtBottom()) {
+                Log.d(TAG, "Scrolling to bottom: scrolled up with keyboard overlay active")
+                renderer.scrollToBottom()
+                // Preserve the bottom offset for keyboard visibility
+                renderer.setScrollPixelOffset(if (shouldScrollContentWithOverlay) bottomOffset else 0f)
+                requestRender()
+            }
+        }
+    }
+
     // ==================== Font Size API ====================
 
     /**
