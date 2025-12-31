@@ -35,6 +35,18 @@ interface TerminalEventListener {
     fun onSurfaceReady(cols: Int, rows: Int)
 
     /**
+     * Called when the GL surface has been resumed after a pause.
+     * Fires after onResumeView() completes and the surface is ready to render.
+     *
+     * Use this to refresh content that may have gone stale during the pause,
+     * or to re-render content that needs to be displayed again.
+     *
+     * Note: This is NOT called on initial surface creation - use onSurfaceReady for that.
+     * This is specifically for pause/resume cycles where the surface was already created.
+     */
+    fun onSurfaceResumed() {}
+
+    /**
      * Called during drag/animation with current keyboard overlay offset progress.
      * Used to drive keyboard visibility animation.
      *
@@ -786,6 +798,12 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         Log.d(TAG, "onResumeView")
         onResume() // Resume the GL thread
         renderer.onResume()
+
+        // Notify listener that surface has resumed, using post() to ensure
+        // the GL thread has had time to fully resume before the callback
+        post {
+            eventListener?.onSurfaceResumed()
+        }
     }
 
     /**
