@@ -2,18 +2,26 @@ package com.ghostty.android.renderer
 
 import android.content.Context
 import android.content.res.TypedArray
+import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Rect
 import android.opengl.GLSurfaceView
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.AttributeSet
 import android.util.Log
 import android.util.TypedValue
 import android.view.Choreographer
 import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.PixelCopy
 import android.view.animation.DecelerateInterpolator
 import android.widget.EdgeEffect
 import android.widget.OverScroller
 import com.ghostty.android.R
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -1247,5 +1255,52 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         }
 
         resetTwoFingerGestureState()
+    }
+
+    // ==================== Screenshot API ====================
+
+    /**
+     * Capture a screenshot of the terminal surface.
+     *
+     * This uses PixelCopy (API 24+) to properly capture the hardware-accelerated
+     * OpenGL surface content. This is necessary because GLSurfaceView renders
+     * to a separate surface that cannot be captured by normal window-based
+     * screenshot methods.
+     *
+     * @return Bitmap of the current terminal content, or null if capture failed
+     */
+    suspend fun captureScreenshot(): Bitmap? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            Log.w(TAG, "PixelCopy not available on API < 24")
+            return null
+        }
+
+        return try {
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+
+            val result = suspendCoroutine<Int> { continuation ->
+                val srcRect = Rect(0, 0, width, height)
+
+                PixelCopy.request(
+                    this,  // SurfaceView (GLSurfaceView extends SurfaceView)
+                    srcRect,
+                    bitmap,
+                    { copyResult -> continuation.resume(copyResult) },
+                    Handler(Looper.getMainLooper())
+                )
+            }
+
+            if (result == PixelCopy.SUCCESS) {
+                Log.d(TAG, "Screenshot captured: ${width}x${height}")
+                bitmap
+            } else {
+                Log.w(TAG, "PixelCopy failed with result: $result")
+                bitmap.recycle()
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to capture screenshot", e)
+            null
+        }
     }
 }
