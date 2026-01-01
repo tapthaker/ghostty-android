@@ -16,6 +16,8 @@ import android.view.Choreographer
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.PixelCopy
+import android.view.VelocityTracker
+import android.view.ViewConfiguration
 import android.view.animation.DecelerateInterpolator
 import android.widget.EdgeEffect
 import android.widget.OverScroller
@@ -145,10 +147,11 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         // Bottom offset animation
         private const val SNAP_ANIMATION_DURATION_MS = 250L
 
-        // Two-finger swipe thresholds (tuned for reliability)
-        private const val TWO_FINGER_SWIPE_THRESHOLD_DP = 30f  // Lower = easier to trigger
-        private const val TWO_FINGER_SWIPE_MAX_TIME_MS = 800L  // More time allowed
-        private const val TWO_FINGER_DIRECTION_RATIO = 1.3f   // Less strict about vertical direction
+        // Two-finger swipe thresholds (velocity-based detection)
+        private const val TWO_FINGER_SWIPE_MIN_VELOCITY = 150f  // pixels/second - minimum velocity to trigger
+        private const val TWO_FINGER_SWIPE_MAX_ANGLE = 30f      // degrees - max angle between fingers for parallel check
+        private const val TWO_FINGER_DIRECTION_RATIO = 1.5f     // vertical/horizontal ratio for swipe direction
+        private const val TWO_FINGER_SWIPE_COOLDOWN_MS = 200L   // cooldown between swipes in same gesture
 
         // Two-finger double-tap thresholds
         private const val TWO_FINGER_TAP_MAX_DISTANCE_DP = 20f
@@ -190,9 +193,9 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     private var twoFingerStartTime = 0L
     private var lastTwoFingerTapTime = 0L
     private var twoFingerSwipeDetected = false
+    private var lastSwipeTime = 0L  // For cooldown between swipes
 
     // Computed pixel thresholds (set in init)
-    private var twoFingerSwipeThresholdPx = 0f
     private var twoFingerTapMaxDistancePx = 0f
 
     // Last row position used by OverScroller (for tracking delta during fling)
@@ -224,6 +227,10 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     // Sweep effect state (animation driven by Choreographer, rendering by OpenGL)
     private var isSweepAnimating = false
     private var sweepStartTime = 0L
+
+    // VelocityTracker for reliable two-finger swipe detection
+    private var velocityTracker: VelocityTracker? = null
+    private val touchSlop: Int by lazy { ViewConfiguration.get(context).scaledTouchSlop }
 
     // Choreographer for driving fling animation at vsync
     private val choreographer = Choreographer.getInstance()
@@ -383,14 +390,24 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
     // Frame callback for sweep animation (updates progress via native renderer)
     private val sweepAnimationCallback = object : Choreographer.FrameCallback {
+        private var frameCount = 0
+
         override fun doFrame(frameTimeNanos: Long) {
-            if (!isSweepAnimating) return
+            if (!isSweepAnimating) {
+                Log.d(TAG, "SWEEP ANIM: doFrame called but isSweepAnimating=false, ignoring")
+                return
+            }
 
             val elapsed = System.currentTimeMillis() - sweepStartTime
             val rawProgress = (elapsed.toFloat() / SWEEP_DURATION_MS).coerceIn(0f, 1f)
 
             // Apply decelerate easing
             val progress = bottomOffsetInterpolator.getInterpolation(rawProgress)
+
+            frameCount++
+            if (frameCount == 1 || rawProgress >= 1f) {
+                Log.d(TAG, "SWEEP ANIM: Frame $frameCount, progress=${(progress * 100).toInt()}%")
+            }
 
             // Update native renderer with new progress
             queueEvent {
@@ -399,6 +416,8 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
             }
 
             if (rawProgress >= 1f) {
+                Log.d(TAG, "SWEEP ANIM: Animation complete after $frameCount frames")
+                frameCount = 0
                 isSweepAnimating = false
                 // Clear sweep when done
                 queueEvent {
@@ -740,7 +759,6 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
         // Compute pixel thresholds from DP values
         val density = context.resources.displayMetrics.density
-        twoFingerSwipeThresholdPx = TWO_FINGER_SWIPE_THRESHOLD_DP * density
         twoFingerTapMaxDistancePx = TWO_FINGER_TAP_MAX_DISTANCE_DP * density
 
         Log.d(TAG, "GL Surface View initialized")
@@ -830,13 +848,16 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
      * @param direction SWEEP_UP (1) for bottom-to-top, SWEEP_DOWN (2) for top-to-bottom
      */
     private fun startSweepEffect(direction: Int) {
-        Log.d(TAG, "startSweepEffect direction=$direction")
+        Log.d(TAG, "SWEEP ANIM: startSweepEffect direction=$direction, wasAnimating=$isSweepAnimating")
         if (isSweepAnimating) {
+            Log.d(TAG, "SWEEP ANIM: Interrupting previous animation")
             choreographer.removeFrameCallback(sweepAnimationCallback)
         }
 
         // Start sweep in native renderer
+        Log.d(TAG, "SWEEP ANIM: Queueing native startSweep")
         queueEvent {
+            Log.d(TAG, "SWEEP ANIM: Calling renderer.startSweep($direction)")
             renderer.startSweep(direction)
             requestRender()
         }
@@ -844,6 +865,7 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         // Start animation loop
         sweepStartTime = System.currentTimeMillis()
         isSweepAnimating = true
+        Log.d(TAG, "SWEEP ANIM: Posting frame callback")
         choreographer.postFrameCallback(sweepAnimationCallback)
     }
 
@@ -1288,11 +1310,18 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                     twoFingerStartY1 = event.getY(0)
                     twoFingerStartX2 = event.getX(1)
                     twoFingerStartY2 = event.getY(1)
+
+                    // Initialize VelocityTracker for this gesture
+                    velocityTracker?.recycle()
+                    velocityTracker = VelocityTracker.obtain()
+                    velocityTracker?.addMovement(event)
                 }
             }
 
             MotionEvent.ACTION_MOVE -> {
                 if (twoFingerGestureActive && event.pointerCount == 2 && !twoFingerSwipeDetected) {
+                    // Add movement to velocity tracker
+                    velocityTracker?.addMovement(event)
                     // Check for swipe gesture during movement
                     checkTwoFingerSwipe(event)
                 }
@@ -1303,62 +1332,97 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 if (event.pointerCount == 2 && twoFingerGestureActive) {
                     finalizeTwoFingerGesture(event)
                 }
+                // Recycle velocity tracker
+                velocityTracker?.recycle()
+                velocityTracker = null
+            }
+
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                // Clean up velocity tracker on gesture end
+                velocityTracker?.recycle()
+                velocityTracker = null
             }
         }
     }
 
     /**
      * Check if the current movement constitutes a two-finger swipe.
+     * Uses VelocityTracker for reliable velocity-based detection.
      */
     private fun checkTwoFingerSwipe(event: MotionEvent) {
-        val elapsedTime = System.currentTimeMillis() - twoFingerStartTime
-        if (elapsedTime > TWO_FINGER_SWIPE_MAX_TIME_MS) {
-            return  // Too slow for swipe
-        }
+        val tracker = velocityTracker ?: return
 
-        // Calculate average movement of both fingers
+        // Calculate movement of both fingers
         val dx1 = event.getX(0) - twoFingerStartX1
         val dy1 = event.getY(0) - twoFingerStartY1
         val dx2 = event.getX(1) - twoFingerStartX2
         val dy2 = event.getY(1) - twoFingerStartY2
 
+        // Check minimum movement (touch slop) before processing
+        val avgDx = (dx1 + dx2) / 2f
         val avgDy = (dy1 + dy2) / 2f
-
-        // Check if fingers are mostly moving in the same vertical direction
-        // Allow one finger to lag behind (not move much) as long as the other moves enough
-        val dominantDy = if (abs(dy1) > abs(dy2)) dy1 else dy2
-        val sameDirection = (dy1 * dy2 >= 0) || (abs(dominantDy) > twoFingerSwipeThresholdPx * 0.7f)
-        if (!sameDirection) {
-            return  // Fingers moving in clearly opposite directions (likely pinch)
+        if (abs(avgDy) < touchSlop) {
+            return  // Not enough movement yet - don't log, too noisy
         }
 
-        // Check if movement is primarily vertical and exceeds threshold
-        val absAvgDx = abs((dx1 + dx2) / 2f)
+        // Check if fingers are roughly parallel (angle check like Almeros ShoveGestureDetector)
+        // Calculate angle between the line connecting fingers
+        val fingerDx = event.getX(1) - event.getX(0)
+        val fingerDy = event.getY(1) - event.getY(0)
+        val fingerAngle = Math.toDegrees(kotlin.math.atan2(fingerDy.toDouble(), fingerDx.toDouble()))
+        val normalizedAngle = abs(fingerAngle) % 180
+        // Fingers should be roughly horizontal (within MAX_ANGLE degrees of horizontal)
+        val isParallel = normalizedAngle < TWO_FINGER_SWIPE_MAX_ANGLE || normalizedAngle > (180 - TWO_FINGER_SWIPE_MAX_ANGLE)
+        if (!isParallel) {
+            Log.d(TAG, "SWIPE REJECTED: Fingers not parallel. Angle: ${normalizedAngle.toInt()}° (need <$TWO_FINGER_SWIPE_MAX_ANGLE° or >${180 - TWO_FINGER_SWIPE_MAX_ANGLE}°)")
+            return
+        }
+
+        // Check if both fingers are moving in the same vertical direction
+        // Allow one finger to be stationary, but not moving opposite
+        if (dy1 * dy2 < 0 && abs(dy1) > touchSlop && abs(dy2) > touchSlop) {
+            Log.d(TAG, "SWIPE REJECTED: Opposite directions. dy1=${dy1.toInt()}, dy2=${dy2.toInt()}")
+            return
+        }
+
+        // Check if movement is primarily vertical
+        val absAvgDx = abs(avgDx)
         val absAvgDy = abs(avgDy)
-
-        if (absAvgDy < twoFingerSwipeThresholdPx) {
-            return  // Not enough vertical movement
+        if (absAvgDx > 0 && absAvgDy / absAvgDx < TWO_FINGER_DIRECTION_RATIO) {
+            Log.d(TAG, "SWIPE REJECTED: Not vertical enough. Ratio: ${(absAvgDy / absAvgDx).format(2)} (need >$TWO_FINGER_DIRECTION_RATIO)")
+            return
         }
 
-        if (absAvgDx > 0 && absAvgDy / absAvgDx < TWO_FINGER_DIRECTION_RATIO) {
-            return  // Not vertical enough (might be diagonal or horizontal)
+        // Compute velocity (pixels per second)
+        tracker.computeCurrentVelocity(1000)
+        val velocityY1 = tracker.getYVelocity(event.getPointerId(0))
+        val velocityY2 = tracker.getYVelocity(event.getPointerId(1))
+        val avgVelocityY = (velocityY1 + velocityY2) / 2f
+
+        // Check if velocity exceeds threshold
+        if (abs(avgVelocityY) < TWO_FINGER_SWIPE_MIN_VELOCITY) {
+            Log.d(TAG, "SWIPE REJECTED: Too slow. Velocity: ${abs(avgVelocityY).toInt()} px/s (need >$TWO_FINGER_SWIPE_MIN_VELOCITY)")
+            return
         }
 
         // Swipe detected!
         twoFingerSwipeDetected = true
+        Log.d(TAG, "✓ SWIPE DETECTED: velocity=${avgVelocityY.toInt()} px/s, angle=${normalizedAngle.toInt()}°, ratio=${if (absAvgDx > 0) (absAvgDy / absAvgDx).format(2) else "∞"}")
 
-        if (avgDy < 0) {
-            // Swipe up (negative Y = up in Android coordinates)
-            Log.d(TAG, "Two-finger swipe UP detected")
+        if (avgVelocityY < 0) {
+            // Swipe up (negative velocity = up in Android coordinates)
+            Log.d(TAG, "Two-finger swipe UP")
             startSweepEffect(SWEEP_UP)
             eventListener?.onTwoFingerSwipeUp()
         } else {
-            // Swipe down (positive Y = down)
-            Log.d(TAG, "Two-finger swipe DOWN detected")
+            // Swipe down (positive velocity = down)
+            Log.d(TAG, "Two-finger swipe DOWN")
             startSweepEffect(SWEEP_DOWN)
             eventListener?.onTwoFingerSwipeDown()
         }
     }
+
+    private fun Float.format(digits: Int) = "%.${digits}f".format(this)
 
     /**
      * Finalize two-finger gesture when one finger lifts.

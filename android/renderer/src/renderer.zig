@@ -1253,8 +1253,8 @@ pub fn startSweep(self: *Self, direction: u32) void {
 /// @param progress Animation progress from 0.0 (start) to 1.0 (end)
 pub fn updateSweep(self: *Self, progress: f32) void {
     self.uniforms.sweep_progress = progress;
-    // Clear direction when animation completes
-    if (progress <= 0.0 or progress >= 1.0) {
+    // Only clear direction when animation completes (not at start!)
+    if (progress >= 1.0) {
         self.uniforms.sweep_direction = 0;
     }
 }
