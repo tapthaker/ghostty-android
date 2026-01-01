@@ -82,6 +82,10 @@ class GhosttyRenderer(
     private external fun nativeStartRipple(centerX: Float, centerY: Float, maxRadius: Float)
     private external fun nativeUpdateRipple(progress: Float)
 
+    // Sweep effect native methods
+    private external fun nativeStartSweep(direction: Int)
+    private external fun nativeUpdateSweep(progress: Float)
+
     // Grid size native method - returns [cols, rows]
     private external fun nativeGetGridSize(): IntArray
 
@@ -480,6 +484,36 @@ class GhosttyRenderer(
             nativeUpdateRipple(progress)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeUpdateRipple", e)
+        }
+    }
+
+    // ============================================================================
+    // Sweep Effect API
+    // ============================================================================
+
+    /**
+     * Start a sweep effect in the given direction.
+     *
+     * @param direction 1 for bottom-to-top (swipe up), 2 for top-to-bottom (swipe down)
+     */
+    fun startSweep(direction: Int) {
+        try {
+            nativeStartSweep(direction)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeStartSweep", e)
+        }
+    }
+
+    /**
+     * Update the sweep animation progress.
+     *
+     * @param progress Animation progress from 0.0 (start) to 1.0 (end)
+     */
+    fun updateSweep(progress: Float) {
+        try {
+            nativeUpdateSweep(progress)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeUpdateSweep", e)
         }
     }
 

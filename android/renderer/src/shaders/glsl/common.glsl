@@ -34,6 +34,8 @@ layout(binding = 0, std140) uniform Globals {
     uniform vec2 ripple_center;
     uniform float ripple_progress;
     uniform float ripple_max_radius;
+    uniform uint sweep_direction;
+    uniform float sweep_progress;
 };
 
 // Bools

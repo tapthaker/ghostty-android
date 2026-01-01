@@ -75,6 +75,12 @@ pub const Uniforms = extern struct {
     /// Ripple effect maximum radius in pixels
     ripple_max_radius: f32 align(4) = 0.0,
 
+    /// Sweep effect direction: 0 = none, 1 = up, 2 = down
+    sweep_direction: u32 align(4) = 0,
+
+    /// Sweep effect animation progress (0.0 = start, 1.0 = end)
+    sweep_progress: f32 align(4) = 0.0,
+
     pub const Bools = packed struct(u32) {
         /// Whether the cursor is 2 cells wide.
         cursor_wide: bool,

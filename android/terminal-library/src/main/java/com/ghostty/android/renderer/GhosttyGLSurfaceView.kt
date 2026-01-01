@@ -145,10 +145,10 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         // Bottom offset animation
         private const val SNAP_ANIMATION_DURATION_MS = 250L
 
-        // Two-finger swipe thresholds
-        private const val TWO_FINGER_SWIPE_THRESHOLD_DP = 50f
-        private const val TWO_FINGER_SWIPE_MAX_TIME_MS = 500L
-        private const val TWO_FINGER_DIRECTION_RATIO = 2.0f
+        // Two-finger swipe thresholds (tuned for reliability)
+        private const val TWO_FINGER_SWIPE_THRESHOLD_DP = 30f  // Lower = easier to trigger
+        private const val TWO_FINGER_SWIPE_MAX_TIME_MS = 800L  // More time allowed
+        private const val TWO_FINGER_DIRECTION_RATIO = 1.3f   // Less strict about vertical direction
 
         // Two-finger double-tap thresholds
         private const val TWO_FINGER_TAP_MAX_DISTANCE_DP = 20f
@@ -157,6 +157,11 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
         // Ripple effect configuration (rendering done in OpenGL shader)
         private const val RIPPLE_DURATION_MS = 300L
+
+        // Sweep effect configuration (rendering done in OpenGL shader)
+        private const val SWEEP_DURATION_MS = 250L
+        private const val SWEEP_UP = 1
+        private const val SWEEP_DOWN = 2
     }
 
     private val renderer: GhosttyRenderer
@@ -215,6 +220,10 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     // Ripple effect state (animation driven by Choreographer, rendering by OpenGL)
     private var isRippleAnimating = false
     private var rippleStartTime = 0L
+
+    // Sweep effect state (animation driven by Choreographer, rendering by OpenGL)
+    private var isSweepAnimating = false
+    private var sweepStartTime = 0L
 
     // Choreographer for driving fling animation at vsync
     private val choreographer = Choreographer.getInstance()
@@ -364,6 +373,36 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 // Clear ripple when done
                 queueEvent {
                     renderer.updateRipple(0f)
+                    requestRender()
+                }
+            } else {
+                choreographer.postFrameCallback(this)
+            }
+        }
+    }
+
+    // Frame callback for sweep animation (updates progress via native renderer)
+    private val sweepAnimationCallback = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!isSweepAnimating) return
+
+            val elapsed = System.currentTimeMillis() - sweepStartTime
+            val rawProgress = (elapsed.toFloat() / SWEEP_DURATION_MS).coerceIn(0f, 1f)
+
+            // Apply decelerate easing
+            val progress = bottomOffsetInterpolator.getInterpolation(rawProgress)
+
+            // Update native renderer with new progress
+            queueEvent {
+                renderer.updateSweep(progress)
+                requestRender()
+            }
+
+            if (rawProgress >= 1f) {
+                isSweepAnimating = false
+                // Clear sweep when done
+                queueEvent {
+                    renderer.updateSweep(0f)
                     requestRender()
                 }
             } else {
@@ -782,6 +821,30 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         rippleStartTime = System.currentTimeMillis()
         isRippleAnimating = true
         choreographer.postFrameCallback(rippleAnimationCallback)
+    }
+
+    /**
+     * Start a sweep effect in the given direction.
+     * The sweep is a horizontal bar that moves across the screen for gesture feedback.
+     *
+     * @param direction SWEEP_UP (1) for bottom-to-top, SWEEP_DOWN (2) for top-to-bottom
+     */
+    private fun startSweepEffect(direction: Int) {
+        Log.d(TAG, "startSweepEffect direction=$direction")
+        if (isSweepAnimating) {
+            choreographer.removeFrameCallback(sweepAnimationCallback)
+        }
+
+        // Start sweep in native renderer
+        queueEvent {
+            renderer.startSweep(direction)
+            requestRender()
+        }
+
+        // Start animation loop
+        sweepStartTime = System.currentTimeMillis()
+        isSweepAnimating = true
+        choreographer.postFrameCallback(sweepAnimationCallback)
     }
 
     /**
@@ -1217,8 +1280,9 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
             MotionEvent.ACTION_POINTER_DOWN -> {
                 // Second finger touched - start tracking two-finger gesture
                 if (event.pointerCount == 2) {
+                    // Reset state for new gesture (allows rapid consecutive swipes)
+                    resetTwoFingerGestureState()
                     twoFingerGestureActive = true
-                    twoFingerSwipeDetected = false
                     twoFingerStartTime = System.currentTimeMillis()
                     twoFingerStartX1 = event.getX(0)
                     twoFingerStartY1 = event.getY(0)
@@ -1260,10 +1324,12 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
         val avgDy = (dy1 + dy2) / 2f
 
-        // Check if both fingers moved in the same vertical direction (parallel movement)
-        val sameDirection = (dy1 * dy2 > 0)
+        // Check if fingers are mostly moving in the same vertical direction
+        // Allow one finger to lag behind (not move much) as long as the other moves enough
+        val dominantDy = if (abs(dy1) > abs(dy2)) dy1 else dy2
+        val sameDirection = (dy1 * dy2 >= 0) || (abs(dominantDy) > twoFingerSwipeThresholdPx * 0.7f)
         if (!sameDirection) {
-            return  // Fingers moving in opposite directions (likely pinch)
+            return  // Fingers moving in clearly opposite directions (likely pinch)
         }
 
         // Check if movement is primarily vertical and exceeds threshold
@@ -1284,10 +1350,12 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         if (avgDy < 0) {
             // Swipe up (negative Y = up in Android coordinates)
             Log.d(TAG, "Two-finger swipe UP detected")
+            startSweepEffect(SWEEP_UP)
             eventListener?.onTwoFingerSwipeUp()
         } else {
             // Swipe down (positive Y = down)
             Log.d(TAG, "Two-finger swipe DOWN detected")
+            startSweepEffect(SWEEP_DOWN)
             eventListener?.onTwoFingerSwipeDown()
         }
     }

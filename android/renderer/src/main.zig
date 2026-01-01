@@ -866,6 +866,59 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeUpdateRipple(
     }
 }
 
+/// Start a sweep effect in the given direction
+/// Java signature: void nativeStartSweep(int direction)
+/// direction: 1 = up (bottom to top), 2 = down (top to bottom)
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeStartSweep(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    direction: c.jint,
+) void {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
+        return;
+    }
+
+    if (state.renderer) |*renderer| {
+        renderer.startSweep(@intCast(direction));
+    }
+}
+
+/// Update the sweep animation progress
+/// Java signature: void nativeUpdateSweep(float progress)
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeUpdateSweep(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    progress: c.jfloat,
+) void {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
+        return;
+    }
+
+    if (state.renderer) |*renderer| {
+        renderer.updateSweep(progress);
+    }
+}
+
 /// Enable or disable FPS display overlay
 /// Java signature: void nativeSetShowFps(boolean show)
 export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetShowFps(
@@ -1237,6 +1290,9 @@ comptime {
     // Ripple effect
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeStartRipple;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeUpdateRipple;
+    // Sweep effect
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeStartSweep;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeUpdateSweep;
     // FPS display
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetShowFps;
     // Grid size

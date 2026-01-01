@@ -71,6 +71,9 @@ cell_text_pipeline: Pipeline,
 /// Ripple effect rendering pipeline (full-screen pass)
 ripple_pipeline: Pipeline,
 
+/// Sweep effect rendering pipeline (full-screen pass)
+sweep_pipeline: Pipeline,
+
 /// Number of glyphs to render (for testing)
 num_test_glyphs: u32 = 0,
 
@@ -360,6 +363,18 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16, ini
     });
     errdefer ripple_pipeline.deinit();
 
+    // Load and compile sweep shaders
+    const sweep_vertex_src = shader_module.loadShaderCode("shaders/glsl/full_screen.v.glsl");
+    const sweep_fragment_src = shader_module.loadShaderCode("shaders/glsl/sweep.f.glsl");
+
+    // Create sweep pipeline (full-screen pass with blending)
+    const sweep_pipeline = try Pipeline.init(null, .{
+        .vertex_src = sweep_vertex_src,
+        .fragment_src = sweep_fragment_src,
+        .blending_enabled = true, // Blend sweep over everything
+    });
+    errdefer sweep_pipeline.deinit();
+
     // Extract terminal state and sync to GPU
     // (This will be done in a temporary renderer-like struct before full init)
     _ = 0; // Reserved for future test glyph count
@@ -441,12 +456,14 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16, ini
         .fps_vao = fps_vao,
         .cell_text_pipeline = cell_text_pipeline,
         .ripple_pipeline = ripple_pipeline,
+        .sweep_pipeline = sweep_pipeline,
         .num_test_glyphs = 0,
     };
 }
 
 pub fn deinit(self: *Self) void {
     log.info("Destroying renderer", .{});
+    self.sweep_pipeline.deinit();
     self.ripple_pipeline.deinit();
     self.cell_text_pipeline.deinit();
     self.fps_vao.delete();
@@ -639,6 +656,17 @@ pub fn render(self: *Self) !void {
         gl.drawArrays(gl.GL_TRIANGLES, 0, 3);
         gl.checkError() catch |err| {
             log.warn("GL error after ripple rendering: {}", .{err});
+        };
+    }
+
+    // ============================================================================
+    // Sweep Effect Pass (rendered on top of text, but under FPS)
+    // ============================================================================
+    if (self.uniforms.sweep_direction != 0 and self.uniforms.sweep_progress > 0.0) {
+        self.sweep_pipeline.use();
+        gl.drawArrays(gl.GL_TRIANGLES, 0, 3);
+        gl.checkError() catch |err| {
+            log.warn("GL error after sweep rendering: {}", .{err});
         };
     }
 
@@ -1200,4 +1228,33 @@ pub fn startRipple(self: *Self, center_x: f32, center_y: f32, max_radius: f32) v
 /// @param progress Animation progress from 0.0 (start) to 1.0 (end)
 pub fn updateRipple(self: *Self, progress: f32) void {
     self.uniforms.ripple_progress = progress;
+}
+
+// ============================================================================
+// Sweep Effect
+// ============================================================================
+
+/// Sweep direction constants
+pub const SweepDirection = enum(u32) {
+    none = 0,
+    up = 1,
+    down = 2,
+};
+
+/// Start a sweep effect in the given direction.
+/// @param direction 1 = sweep up (bottom to top), 2 = sweep down (top to bottom)
+pub fn startSweep(self: *Self, direction: u32) void {
+    log.info("startSweep direction={}", .{direction});
+    self.uniforms.sweep_direction = direction;
+    // Progress will be updated by updateSweep
+}
+
+/// Update the sweep animation progress.
+/// @param progress Animation progress from 0.0 (start) to 1.0 (end)
+pub fn updateSweep(self: *Self, progress: f32) void {
+    self.uniforms.sweep_progress = progress;
+    // Clear direction when animation completes
+    if (progress <= 0.0 or progress >= 1.0) {
+        self.uniforms.sweep_direction = 0;
+    }
 }
