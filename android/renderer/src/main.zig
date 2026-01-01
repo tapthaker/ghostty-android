@@ -812,6 +812,60 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetScrollPixel
     }
 }
 
+/// Start a ripple effect at the given position
+/// Java signature: void nativeStartRipple(float centerX, float centerY, float maxRadius)
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeStartRipple(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    centerX: c.jfloat,
+    centerY: c.jfloat,
+    maxRadius: c.jfloat,
+) void {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
+        return;
+    }
+
+    if (state.renderer) |*renderer| {
+        renderer.startRipple(centerX, centerY, maxRadius);
+    }
+}
+
+/// Update the ripple animation progress
+/// Java signature: void nativeUpdateRipple(float progress)
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeUpdateRipple(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    progress: c.jfloat,
+) void {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
+        return;
+    }
+
+    if (state.renderer) |*renderer| {
+        renderer.updateRipple(progress);
+    }
+}
+
 /// Enable or disable FPS display overlay
 /// Java signature: void nativeSetShowFps(boolean show)
 export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetShowFps(
@@ -1180,6 +1234,9 @@ comptime {
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetViewportOffset;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeScrollToBottom;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetScrollPixelOffset;
+    // Ripple effect
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeStartRipple;
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeUpdateRipple;
     // FPS display
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetShowFps;
     // Grid size

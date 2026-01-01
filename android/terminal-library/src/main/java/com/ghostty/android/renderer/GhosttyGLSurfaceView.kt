@@ -154,6 +154,9 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         private const val TWO_FINGER_TAP_MAX_DISTANCE_DP = 20f
         private const val TWO_FINGER_TAP_MAX_TIME_MS = 200L
         private const val TWO_FINGER_DOUBLE_TAP_TIMEOUT_MS = 300L
+
+        // Ripple effect configuration (rendering done in OpenGL shader)
+        private const val RIPPLE_DURATION_MS = 300L
     }
 
     private val renderer: GhosttyRenderer
@@ -208,6 +211,10 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     private var isSelectionMode = false
     private var selectionStartX = 0f
     private var selectionStartY = 0f
+
+    // Ripple effect state (animation driven by Choreographer, rendering by OpenGL)
+    private var isRippleAnimating = false
+    private var rippleStartTime = 0L
 
     // Choreographer for driving fling animation at vsync
     private val choreographer = Choreographer.getInstance()
@@ -330,6 +337,36 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 }
             } else {
                 // Continue animation
+                choreographer.postFrameCallback(this)
+            }
+        }
+    }
+
+    // Frame callback for ripple animation (updates progress via native renderer)
+    private val rippleAnimationCallback = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!isRippleAnimating) return
+
+            val elapsed = System.currentTimeMillis() - rippleStartTime
+            val rawProgress = (elapsed.toFloat() / RIPPLE_DURATION_MS).coerceIn(0f, 1f)
+
+            // Apply decelerate easing
+            val progress = bottomOffsetInterpolator.getInterpolation(rawProgress)
+
+            // Update native renderer with new progress
+            queueEvent {
+                renderer.updateRipple(progress)
+                requestRender()
+            }
+
+            if (rawProgress >= 1f) {
+                isRippleAnimating = false
+                // Clear ripple when done
+                queueEvent {
+                    renderer.updateRipple(0f)
+                    requestRender()
+                }
+            } else {
                 choreographer.postFrameCallback(this)
             }
         }
@@ -607,6 +644,7 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
                 Log.d(TAG, "Single-finger double tap detected")
+                startRippleEffect(e.x, e.y)
                 eventListener?.onDoubleTap()
                 return true
             }
@@ -684,6 +722,7 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
     /**
      * Draw edge effects on top of the GL surface.
+     * Note: Ripple effect is now rendered in OpenGL.
      */
     override fun draw(canvas: Canvas) {
         super.draw(canvas)
@@ -709,6 +748,40 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
             }
             canvas.restoreToCount(restoreCount)
         }
+    }
+
+    /**
+     * Start a Material Design ripple effect at the specified coordinates.
+     * The ripple is rendered in OpenGL; this method initiates the animation.
+     *
+     * @param x X coordinate of ripple center (touch location)
+     * @param y Y coordinate of ripple center (touch location)
+     */
+    private fun startRippleEffect(x: Float, y: Float) {
+        Log.d(TAG, "startRippleEffect at ($x, $y)")
+        if (isRippleAnimating) {
+            choreographer.removeFrameCallback(rippleAnimationCallback)
+        }
+
+        // Max radius = distance to farthest corner
+        val corners = listOf(
+            kotlin.math.hypot(x.toDouble(), y.toDouble()),
+            kotlin.math.hypot((width - x).toDouble(), y.toDouble()),
+            kotlin.math.hypot(x.toDouble(), (height - y).toDouble()),
+            kotlin.math.hypot((width - x).toDouble(), (height - y).toDouble())
+        )
+        val maxRadius = corners.maxOrNull()?.toFloat() ?: 0f
+
+        // Start ripple in native renderer
+        queueEvent {
+            renderer.startRipple(x, y, maxRadius)
+            requestRender()
+        }
+
+        // Start animation loop
+        rippleStartTime = System.currentTimeMillis()
+        isRippleAnimating = true
+        choreographer.postFrameCallback(rippleAnimationCallback)
     }
 
     /**

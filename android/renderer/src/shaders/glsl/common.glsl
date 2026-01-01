@@ -31,6 +31,9 @@ layout(binding = 0, std140) uniform Globals {
     uniform vec4 font_decoration_metrics;
     uniform float baseline;
     uniform float scroll_pixel_offset;
+    uniform vec2 ripple_center;
+    uniform float ripple_progress;
+    uniform float ripple_max_radius;
 };
 
 // Bools

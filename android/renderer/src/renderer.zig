@@ -68,6 +68,9 @@ glyphs_buffer: Buffer(shaders.CellText),
 /// Cell text rendering pipeline
 cell_text_pipeline: Pipeline,
 
+/// Ripple effect rendering pipeline (full-screen pass)
+ripple_pipeline: Pipeline,
+
 /// Number of glyphs to render (for testing)
 num_test_glyphs: u32 = 0,
 
@@ -345,6 +348,18 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16, ini
     // Note: We leave the program bound after setting uniforms
     // The uniforms are part of the program state and will persist
 
+    // Load and compile ripple shaders
+    const ripple_vertex_src = shader_module.loadShaderCode("shaders/glsl/full_screen.v.glsl");
+    const ripple_fragment_src = shader_module.loadShaderCode("shaders/glsl/ripple.f.glsl");
+
+    // Create ripple pipeline (full-screen pass with blending)
+    const ripple_pipeline = try Pipeline.init(null, .{
+        .vertex_src = ripple_vertex_src,
+        .fragment_src = ripple_fragment_src,
+        .blending_enabled = true, // Blend ripple over everything
+    });
+    errdefer ripple_pipeline.deinit();
+
     // Extract terminal state and sync to GPU
     // (This will be done in a temporary renderer-like struct before full init)
     _ = 0; // Reserved for future test glyph count
@@ -425,12 +440,14 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16, ini
         .fps_glyphs_buffer = fps_glyphs_buffer,
         .fps_vao = fps_vao,
         .cell_text_pipeline = cell_text_pipeline,
+        .ripple_pipeline = ripple_pipeline,
         .num_test_glyphs = 0,
     };
 }
 
 pub fn deinit(self: *Self) void {
     log.info("Destroying renderer", .{});
+    self.ripple_pipeline.deinit();
     self.cell_text_pipeline.deinit();
     self.fps_vao.delete();
     self.fps_glyphs_buffer.deinit();
@@ -612,6 +629,17 @@ pub fn render(self: *Self) !void {
         };
     } else {
         log.warn("num_test_glyphs is 0, skipping text rendering", .{});
+    }
+
+    // ============================================================================
+    // Ripple Effect Pass (rendered on top of text, but under FPS)
+    // ============================================================================
+    if (self.uniforms.ripple_progress > 0.0 and self.uniforms.ripple_max_radius > 0.0) {
+        self.ripple_pipeline.use();
+        gl.drawArrays(gl.GL_TRIANGLES, 0, 3);
+        gl.checkError() catch |err| {
+            log.warn("GL error after ripple rendering: {}", .{err});
+        };
     }
 
     // ============================================================================
@@ -1151,4 +1179,25 @@ fn syncFpsOverlay(self: *Self) !void {
     // Upload to FPS buffer
     try self.fps_glyphs_buffer.sync(fps_glyphs[0..glyph_count]);
     self.num_fps_glyphs = glyph_count;
+}
+
+// ============================================================================
+// Ripple Effect
+// ============================================================================
+
+/// Start a ripple effect at the given position.
+/// @param center_x X coordinate in screen pixels
+/// @param center_y Y coordinate in screen pixels
+/// @param max_radius Maximum radius the ripple will expand to
+pub fn startRipple(self: *Self, center_x: f32, center_y: f32, max_radius: f32) void {
+    log.info("startRipple at ({d:.1}, {d:.1}) with max_radius={d:.1}", .{ center_x, center_y, max_radius });
+    self.uniforms.ripple_center = .{ center_x, center_y };
+    self.uniforms.ripple_max_radius = max_radius;
+    // Progress will be updated by updateRipple
+}
+
+/// Update the ripple animation progress.
+/// @param progress Animation progress from 0.0 (start) to 1.0 (end)
+pub fn updateRipple(self: *Self, progress: f32) void {
+    self.uniforms.ripple_progress = progress;
 }

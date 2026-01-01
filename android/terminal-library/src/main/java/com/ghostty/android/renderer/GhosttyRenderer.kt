@@ -78,6 +78,10 @@ class GhosttyRenderer(
     private external fun nativeScrollToViewportOffset(row: Int)
     private external fun nativeSetScrollPixelOffset(offset: Float)
 
+    // Ripple effect native methods
+    private external fun nativeStartRipple(centerX: Float, centerY: Float, maxRadius: Float)
+    private external fun nativeUpdateRipple(progress: Float)
+
     // Grid size native method - returns [cols, rows]
     private external fun nativeGetGridSize(): IntArray
 
@@ -444,6 +448,38 @@ class GhosttyRenderer(
             nativeSetScrollPixelOffset(offset)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeSetScrollPixelOffset", e)
+        }
+    }
+
+    // ============================================================================
+    // Ripple Effect API
+    // ============================================================================
+
+    /**
+     * Start a ripple effect at the given screen position.
+     *
+     * @param centerX X coordinate of ripple center in pixels
+     * @param centerY Y coordinate of ripple center in pixels
+     * @param maxRadius Maximum radius the ripple will expand to
+     */
+    fun startRipple(centerX: Float, centerY: Float, maxRadius: Float) {
+        try {
+            nativeStartRipple(centerX, centerY, maxRadius)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeStartRipple", e)
+        }
+    }
+
+    /**
+     * Update the ripple animation progress.
+     *
+     * @param progress Animation progress from 0.0 (start) to 1.0 (end)
+     */
+    fun updateRipple(progress: Float) {
+        try {
+            nativeUpdateRipple(progress)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeUpdateRipple", e)
         }
     }
 

@@ -66,6 +66,15 @@ pub const Uniforms = extern struct {
     /// larger offsets like keyboard area.
     scroll_pixel_offset: f32 align(4) = 0.0,
 
+    /// Ripple effect center position in pixels (screen coordinates)
+    ripple_center: [2]f32 align(8) = .{ 0.0, 0.0 },
+
+    /// Ripple effect animation progress (0.0 = start, 1.0 = end)
+    ripple_progress: f32 align(4) = 0.0,
+
+    /// Ripple effect maximum radius in pixels
+    ripple_max_radius: f32 align(4) = 0.0,
+
     pub const Bools = packed struct(u32) {
         /// Whether the cursor is 2 cells wide.
         cursor_wide: bool,
