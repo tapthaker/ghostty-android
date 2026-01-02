@@ -173,16 +173,20 @@ class GhosttyRenderer(
         try {
             nativeOnSurfaceChanged(width, height, dpi, pendingFontSize)
 
-            // Get grid size and notify callback
+            // Get grid size and notify callback only if size changed
             val gridSize = getGridSize()
             val cols = gridSize[0]
             val rows = gridSize[1]
             if (cols > 0 && rows > 0) {
-                Log.d(TAG, "Surface ready with grid size: ${cols}x${rows}")
-                // Update tracking and notify callback
+                val sizeChanged = cols != lastGridCols || rows != lastGridRows
+                Log.d(TAG, "Surface ready with grid size: ${cols}x${rows}, changed=$sizeChanged")
+                // Update tracking
                 lastGridCols = cols
                 lastGridRows = rows
-                onSurfaceChangedCallback?.invoke(cols, rows)
+                // Only notify callback if size actually changed
+                if (sizeChanged) {
+                    onSurfaceChangedCallback?.invoke(cols, rows)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeOnSurfaceChanged", e)
