@@ -16,6 +16,14 @@ const screen_extractor = @import("screen_extractor.zig");
 
 const log = std.log.scoped(.renderer);
 
+/// Microphone indicator state for always-on voice input
+pub const MicIndicatorState = enum(u8) {
+    off = 0,    // Hidden - no indicator shown
+    idle = 1,   // Blue - connected, waiting for speech
+    active = 2, // Green with pulse - speech detected
+    err = 3,    // Red - error state
+};
+
 const Self = @This();
 
 /// Allocator for renderer resources
@@ -97,6 +105,30 @@ show_fps: bool = true,
 last_frame_time: i64 = 0,
 frame_count: u32 = 0,
 current_fps: u32 = 0,
+
+/// Frame timing diagnostics
+last_render_time: i64 = 0,
+frame_times: [60]i64 = [_]i64{0} ** 60,  // Last 60 frame times in nanoseconds
+frame_time_index: u32 = 0,
+slow_frame_count: u32 = 0,  // Frames taking > 16.6ms (60fps threshold)
+current_jitter_ms: f32 = 0.0,  // Current frame jitter (max - min)
+current_max_ms: f32 = 0.0,  // Current max frame time
+sync_time_ns: i64 = 0,  // Time spent in syncFromTerminal
+
+/// Microphone indicator state
+mic_indicator_state: MicIndicatorState = .off,
+
+/// Mic indicator glyph buffer (separate from main glyphs)
+mic_glyphs_buffer: Buffer(shaders.CellText),
+
+/// VAO for mic indicator (separate from main VAO)
+mic_vao: gl.VertexArray,
+
+/// Number of mic indicator glyphs
+num_mic_glyphs: u32 = 0,
+
+/// Mic indicator pulse animation progress (0.0 to 1.0)
+mic_pulse_progress: f32 = 0.0,
 
 /// Cursor state for rendering (app-level state passed to cursor style helper)
 focused: bool = true,
@@ -300,11 +332,11 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16, ini
     }, max_cells);
     errdefer glyphs_buffer.deinit();
 
-    // Create FPS overlay buffer (capacity for bg blocks + text glyphs)
+    // Create FPS overlay buffer (capacity for bg blocks + text glyphs, 2 lines)
     var fps_glyphs_buffer = try Buffer(shaders.CellText).init(.{
         .target = .array,
         .usage = .dynamic_draw,
-    }, 32);
+    }, 128);
     errdefer fps_glyphs_buffer.deinit();
 
     // Create VAO for FPS overlay (must be separate from main VAO because
@@ -315,6 +347,23 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16, ini
     // Configure FPS VAO with fps_glyphs_buffer bound
     fps_vao.bind();
     fps_glyphs_buffer.buffer.bind(fps_glyphs_buffer.opts.target);
+    try Pipeline.autoConfigureAttributes(shaders.CellText, .per_instance);
+    gl.VertexArray.unbind();
+
+    // Create mic indicator buffer (capacity for bg block + mic glyph)
+    var mic_glyphs_buffer = try Buffer(shaders.CellText).init(.{
+        .target = .array,
+        .usage = .dynamic_draw,
+    }, 4); // 2 for background, 2 for glyphs
+    errdefer mic_glyphs_buffer.deinit();
+
+    // Create VAO for mic indicator (separate from main VAO)
+    const mic_vao = try gl.VertexArray.create();
+    errdefer mic_vao.delete();
+
+    // Configure mic VAO with mic_glyphs_buffer bound
+    mic_vao.bind();
+    mic_glyphs_buffer.buffer.bind(mic_glyphs_buffer.opts.target);
     try Pipeline.autoConfigureAttributes(shaders.CellText, .per_instance);
     gl.VertexArray.unbind();
 
@@ -454,6 +503,8 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16, ini
         .glyphs_buffer = glyphs_buffer,
         .fps_glyphs_buffer = fps_glyphs_buffer,
         .fps_vao = fps_vao,
+        .mic_glyphs_buffer = mic_glyphs_buffer,
+        .mic_vao = mic_vao,
         .cell_text_pipeline = cell_text_pipeline,
         .ripple_pipeline = ripple_pipeline,
         .sweep_pipeline = sweep_pipeline,
@@ -466,6 +517,8 @@ pub fn deinit(self: *Self) void {
     self.sweep_pipeline.deinit();
     self.ripple_pipeline.deinit();
     self.cell_text_pipeline.deinit();
+    self.mic_vao.delete();
+    self.mic_glyphs_buffer.deinit();
     self.fps_vao.delete();
     self.fps_glyphs_buffer.deinit();
     self.glyphs_buffer.deinit();
@@ -568,6 +621,31 @@ pub fn render(self: *Self) !void {
     const now: i64 = @truncate(std.time.nanoTimestamp());
     self.frame_count += 1;
 
+    // Frame timing diagnostics - measure time since last render
+    const frame_delta = if (self.last_render_time > 0) now - self.last_render_time else 0;
+    self.last_render_time = now;
+
+    // Track frame times in circular buffer
+    self.frame_times[self.frame_time_index] = frame_delta;
+    self.frame_time_index = (self.frame_time_index + 1) % 60;
+
+    // Detect slow frames (> 16.6ms = 60fps, > 11.1ms = 90fps)
+    const slow_threshold: i64 = 11_111_111; // 11.1ms for 90fps
+    const very_slow_threshold: i64 = 33_333_333; // 33.3ms = 30fps
+
+    if (frame_delta > slow_threshold and frame_delta > 0) {
+        self.slow_frame_count += 1;
+        const frame_ms = @as(f32, @floatFromInt(frame_delta)) / 1_000_000.0;
+
+        if (frame_delta > very_slow_threshold) {
+            log.warn("SLOW FRAME: {d:.1}ms (frame #{d}, slow frames: {d})", .{
+                frame_ms,
+                self.frame_count,
+                self.slow_frame_count,
+            });
+        }
+    }
+
     // Update FPS every 500ms
     // Guard against clock issues (negative elapsed, division by zero)
     const elapsed = now - self.last_frame_time;
@@ -576,8 +654,45 @@ pub fn render(self: *Self) !void {
         // Clamp to reasonable range to avoid overflow
         const fps = @divFloor(@as(i64, self.frame_count) * 1_000_000_000, elapsed);
         self.current_fps = if (fps > 0 and fps <= 9999) @intCast(fps) else if (fps > 9999) 9999 else 0;
+
+        // Log frame timing stats every 500ms
+        var min_time: i64 = std.math.maxInt(i64);
+        var max_time: i64 = 0;
+        var sum_time: i64 = 0;
+        var valid_count: u32 = 0;
+
+        for (self.frame_times) |t| {
+            if (t > 0) {
+                min_time = @min(min_time, t);
+                max_time = @max(max_time, t);
+                sum_time += t;
+                valid_count += 1;
+            }
+        }
+
+        if (valid_count > 0) {
+            const min_ms = @as(f32, @floatFromInt(min_time)) / 1_000_000.0;
+            const max_ms = @as(f32, @floatFromInt(max_time)) / 1_000_000.0;
+            const avg_ms = @as(f32, @floatFromInt(sum_time)) / @as(f32, @floatFromInt(valid_count)) / 1_000_000.0;
+            const jitter_ms = max_ms - min_ms;
+
+            // Store for display in FPS overlay
+            self.current_jitter_ms = jitter_ms;
+            self.current_max_ms = max_ms;
+
+            log.info("FRAME TIMING: FPS={d}, min={d:.1}ms, max={d:.1}ms, avg={d:.1}ms, jitter={d:.1}ms, slow_frames={d}", .{
+                self.current_fps,
+                min_ms,
+                max_ms,
+                avg_ms,
+                jitter_ms,
+                self.slow_frame_count,
+            });
+        }
+
         self.frame_count = 0;
         self.last_frame_time = now;
+        self.slow_frame_count = 0;
     }
 
     // Skip syncing during synchronized output mode (ESC[?2026h).
@@ -585,11 +700,17 @@ pub fn render(self: *Self) !void {
     // We still render the existing buffers to avoid visual freeze.
     if (!self.terminal_manager.isSynchronizedOutputActive()) {
         // Sync renderer state from terminal (extract cells and update GPU buffers)
+        const sync_start: i64 = @truncate(std.time.nanoTimestamp());
         try self.syncFromTerminal();
+        const sync_end: i64 = @truncate(std.time.nanoTimestamp());
+        self.sync_time_ns = sync_end - sync_start;
     }
 
     // Sync FPS overlay to separate buffer (rendered with scroll_pixel_offset=0)
     try self.syncFpsOverlay();
+
+    // Sync mic indicator to separate buffer (rendered with scroll_pixel_offset=0)
+    try self.syncMicIndicator();
 
     // Clear with transparent black (will be overwritten by bg_color shader)
     gl.clearColor(0.0, 0.0, 0.0, 0.0);
@@ -696,6 +817,31 @@ pub fn render(self: *Self) !void {
         // Restore original scroll offset
         self.uniforms.scroll_pixel_offset = saved_scroll_offset;
         // Note: We don't need to sync uniforms again since this is the end of render()
+    }
+
+    // ============================================================================
+    // Mic Indicator Pass (rendered at top-left corner, with scroll_pixel_offset=0)
+    // ============================================================================
+    if (self.num_mic_glyphs > 0) {
+        // Save current scroll offset
+        const saved_scroll_offset = self.uniforms.scroll_pixel_offset;
+
+        // Temporarily set scroll_pixel_offset to 0 so mic indicator doesn't scroll
+        self.uniforms.scroll_pixel_offset = 0.0;
+        try self.syncUniforms();
+
+        // Bind the mic VAO (which is configured to use mic_glyphs_buffer)
+        self.mic_vao.bind();
+
+        // Draw mic indicator glyphs
+        log.debug("Drawing {} mic indicator glyphs", .{self.num_mic_glyphs});
+        gl.drawArraysInstanced(gl.GL_TRIANGLE_STRIP, 0, 4, @intCast(self.num_mic_glyphs));
+        gl.checkError() catch |err| {
+            log.err("GL error after mic indicator drawArraysInstanced: {}", .{err});
+        };
+
+        // Restore original scroll offset
+        self.uniforms.scroll_pixel_offset = saved_scroll_offset;
     }
 }
 
@@ -1134,6 +1280,17 @@ pub fn setShowFps(self: *Self, show: bool) void {
     self.show_fps = show;
 }
 
+/// Set the microphone indicator state
+pub fn setMicIndicatorState(self: *Self, state: u8) void {
+    const new_state = std.meta.intToEnum(MicIndicatorState, state) catch .off;
+    log.info("setMicIndicatorState: {} -> {}", .{ self.mic_indicator_state, new_state });
+    self.mic_indicator_state = new_state;
+    // Reset pulse animation when state changes
+    if (new_state == .active) {
+        self.mic_pulse_progress = 0.0;
+    }
+}
+
 /// Sync FPS overlay glyphs to the separate FPS buffer
 /// This is called from render() and updates fps_glyphs_buffer directly.
 fn syncFpsOverlay(self: *Self) !void {
@@ -1146,67 +1303,171 @@ fn syncFpsOverlay(self: *Self) !void {
         return;
     }
 
-    // Format FPS string: "FPS:XXX" (7 chars max)
-    var buf: [10]u8 = undefined;
-    const fps_text = std.fmt.bufPrint(&buf, "FPS:{d:3}", .{self.current_fps}) catch {
-        self.num_fps_glyphs = 0;
-        return;
-    };
+    // Format display strings - show FPS, jitter, and sync time
+    // Line 1: "FPS:XXX J:XXms" (FPS and jitter)
+    // Line 2: "Mx:XXms S:XXms" (max frame time and sync time)
+    var line1_buf: [20]u8 = undefined;
+    var line2_buf: [20]u8 = undefined;
 
-    // Position at top-right (row 0, rightmost columns)
-    const text_len: u16 = @intCast(@min(fps_text.len, self.grid_cols));
-    const start_col: u16 = self.grid_cols - text_len;
+    const jitter_int: u32 = @intFromFloat(self.current_jitter_ms);
+    const max_int: u32 = @intFromFloat(self.current_max_ms);
+    const sync_ms = @as(f32, @floatFromInt(self.sync_time_ns)) / 1_000_000.0;
+    const sync_int: u32 = @intFromFloat(sync_ms);
+
+    const line1 = std.fmt.bufPrint(&line1_buf, "{d:3}fps J:{d:2}ms", .{ self.current_fps, jitter_int }) catch "???";
+    const line2 = std.fmt.bufPrint(&line2_buf, "Mx:{d:2} Sy:{d:2}ms", .{ max_int, sync_int }) catch "???";
 
     // Colors for FPS overlay
-    const bg_color = [4]u8{ 0, 0, 0, 255 }; // Fully opaque black background
-    const text_color = [4]u8{ 0, 255, 0, 255 }; // Bright green text
+    const bg_color = [4]u8{ 0, 0, 0, 220 }; // Semi-transparent black background
+
+    // Color based on jitter - green if good, yellow if moderate, red if bad
+    const text_color: [4]u8 = if (self.current_jitter_ms < 5.0)
+        [4]u8{ 0, 255, 0, 255 } // Green - smooth
+    else if (self.current_jitter_ms < 15.0)
+        [4]u8{ 255, 255, 0, 255 } // Yellow - moderate jitter
+    else
+        [4]u8{ 255, 80, 80, 255 }; // Red - high jitter (laggy)
 
     // No special attributes
     const attributes = shaders.CellText.Attributes{};
 
-    // Build glyph array for FPS overlay
-    // First add background blocks, then text glyphs
-    var fps_glyphs: [32]shaders.CellText = undefined;
+    // Build glyph array for FPS overlay (2 lines now)
+    var fps_glyphs: [128]shaders.CellText = undefined;
     var glyph_count: u32 = 0;
 
-    // Add background blocks (full block character)
     const block_char: u32 = 0x2588; // █ Full block character
-    for (fps_text, 0..) |_, i| {
-        const col = start_col +| @as(u16, @intCast(i));
-        if (col >= self.grid_cols) break;
-        if (glyph_count >= 16) break;
 
-        fps_glyphs[glyph_count] = (&self.font_system).makeCellText(
-            block_char,
-            col,
-            0, // top row
-            bg_color,
-            attributes,
-            1, // single width
-        );
-        glyph_count += 1;
-    }
+    // Helper to add a line of text at a given row
+    const addLine = struct {
+        fn add(
+            glyphs: *[128]shaders.CellText,
+            count: *u32,
+            text: []const u8,
+            row: u16,
+            grid_cols: u16,
+            bg: [4]u8,
+            fg: [4]u8,
+            attrs: shaders.CellText.Attributes,
+            font_sys: *DynamicFontSystem,
+        ) void {
+            const text_len: u16 = @intCast(@min(text.len, grid_cols));
+            const start_col: u16 = grid_cols -| text_len;
 
-    // Add text glyphs on top
-    for (fps_text, 0..) |char, i| {
-        const col = start_col +| @as(u16, @intCast(i));
-        if (col >= self.grid_cols) break;
-        if (glyph_count >= 32) break;
+            // Add background blocks
+            for (text, 0..) |_, i| {
+                const col = start_col +| @as(u16, @intCast(i));
+                if (col >= grid_cols) break;
+                if (count.* >= 64) break;
 
-        fps_glyphs[glyph_count] = (&self.font_system).makeCellText(
-            char,
-            col,
-            0, // top row
-            text_color,
-            attributes,
-            1, // single width
-        );
-        glyph_count += 1;
-    }
+                glyphs[count.*] = font_sys.makeCellText(
+                    block_char,
+                    col,
+                    row,
+                    bg,
+                    attrs,
+                    1,
+                );
+                count.* += 1;
+            }
+
+            // Add text glyphs
+            for (text, 0..) |char, i| {
+                const col = start_col +| @as(u16, @intCast(i));
+                if (col >= grid_cols) break;
+                if (count.* >= 128) break;
+
+                glyphs[count.*] = font_sys.makeCellText(
+                    char,
+                    col,
+                    row,
+                    fg,
+                    attrs,
+                    1,
+                );
+                count.* += 1;
+            }
+        }
+    }.add;
+
+    // Add line 1 at row 0
+    addLine(&fps_glyphs, &glyph_count, line1, 0, self.grid_cols, bg_color, text_color, attributes, &self.font_system);
+
+    // Add line 2 at row 1
+    addLine(&fps_glyphs, &glyph_count, line2, 1, self.grid_cols, bg_color, text_color, attributes, &self.font_system);
 
     // Upload to FPS buffer
     try self.fps_glyphs_buffer.sync(fps_glyphs[0..glyph_count]);
     self.num_fps_glyphs = glyph_count;
+}
+
+/// Sync mic indicator glyphs to the separate mic buffer
+/// This is called from render() and updates mic_glyphs_buffer directly.
+fn syncMicIndicator(self: *Self) !void {
+    if (self.mic_indicator_state == .off) {
+        self.num_mic_glyphs = 0;
+        return;
+    }
+
+    // Update pulse animation progress for active state
+    if (self.mic_indicator_state == .active) {
+        self.mic_pulse_progress += 0.05; // About 20 frames per pulse cycle
+        if (self.mic_pulse_progress > 1.0) {
+            self.mic_pulse_progress = 0.0;
+        }
+    }
+
+    // Position at top-left (row 0, column 0)
+    // Use a mic icon character (🎤 = U+1F3A4 might not render well, use a simpler indicator)
+    // We'll use ● (U+25CF) or ◉ (U+25C9) as a simple filled circle indicator
+    const indicator_char: u32 = 0x25CF; // ● Black circle
+
+    // Colors based on state
+    const text_color: [4]u8 = switch (self.mic_indicator_state) {
+        .off => [4]u8{ 0, 0, 0, 0 }, // Should not reach here
+        .idle => [4]u8{ 66, 165, 245, 255 }, // Blue (#42A5F5)
+        .active => blk: {
+            // Pulse effect: interpolate alpha based on progress
+            const pulse_alpha: u8 = @intFromFloat(200.0 + 55.0 * @sin(self.mic_pulse_progress * std.math.pi * 2.0));
+            break :blk [4]u8{ 76, 175, 80, pulse_alpha }; // Green (#4CAF50) with pulsing alpha
+        },
+        .err => [4]u8{ 244, 67, 54, 255 }, // Red (#F44336)
+    };
+
+    // Background color (dark semi-transparent)
+    const bg_color = [4]u8{ 0, 0, 0, 200 };
+
+    // No special attributes
+    const attributes = shaders.CellText.Attributes{};
+
+    var mic_glyphs: [4]shaders.CellText = undefined;
+    var glyph_count: u32 = 0;
+
+    // Add background block (full block character)
+    const block_char: u32 = 0x2588; // █ Full block character
+    mic_glyphs[glyph_count] = (&self.font_system).makeCellText(
+        block_char,
+        0, // column 0
+        0, // row 0
+        bg_color,
+        attributes,
+        1, // single width
+    );
+    glyph_count += 1;
+
+    // Add the indicator glyph on top
+    mic_glyphs[glyph_count] = (&self.font_system).makeCellText(
+        indicator_char,
+        0, // column 0
+        0, // row 0
+        text_color,
+        attributes,
+        1, // single width
+    );
+    glyph_count += 1;
+
+    // Upload to mic buffer
+    try self.mic_glyphs_buffer.sync(mic_glyphs[0..glyph_count]);
+    self.num_mic_glyphs = glyph_count;
 }
 
 // ============================================================================

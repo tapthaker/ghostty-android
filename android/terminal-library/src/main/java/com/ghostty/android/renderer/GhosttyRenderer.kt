@@ -92,6 +92,9 @@ class GhosttyRenderer(
     // FPS display native method
     private external fun nativeSetShowFps(show: Boolean)
 
+    // Mic indicator native method
+    private external fun nativeSetMicIndicatorState(state: Int)
+
     // Selection native methods
     private external fun nativeGetCellSize(): FloatArray
     private external fun nativeStartSelection(col: Int, row: Int)
@@ -555,6 +558,25 @@ class GhosttyRenderer(
             nativeSetShowFps(show)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeSetShowFps", e)
+        }
+    }
+
+    /**
+     * Set the microphone indicator state for always-on voice input.
+     *
+     * The indicator appears at the top-left corner of the terminal:
+     * - 0 (OFF): Hidden
+     * - 1 (IDLE): Blue mic icon (listening, waiting for speech)
+     * - 2 (ACTIVE): Green pulsing mic icon (speech detected)
+     * - 3 (ERROR): Red mic icon (error state)
+     *
+     * @param state The microphone indicator state (0-3)
+     */
+    fun setMicIndicatorState(state: Int) {
+        try {
+            nativeSetMicIndicatorState(state)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeSetMicIndicatorState", e)
         }
     }
 

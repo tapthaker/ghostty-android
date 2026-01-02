@@ -946,6 +946,34 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetShowFps(
     }
 }
 
+/// Set the microphone indicator state for always-on voice input
+/// Java signature: void nativeSetMicIndicatorState(int state)
+/// state: 0=OFF, 1=IDLE, 2=ACTIVE, 3=ERROR
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetMicIndicatorState(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    mic_state: c.jint,
+) void {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
+        log.warn("Attempted to set mic indicator state before renderer initialized", .{});
+        return;
+    }
+
+    if (state.renderer) |*renderer| {
+        renderer.setMicIndicatorState(@intCast(mic_state));
+    }
+}
+
 /// Get the current terminal grid size (columns and rows)
 /// Java signature: int[] nativeGetGridSize()
 /// Returns [cols, rows] array
@@ -1295,6 +1323,8 @@ comptime {
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeUpdateSweep;
     // FPS display
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetShowFps;
+    // Mic indicator
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetMicIndicatorState;
     // Grid size
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetGridSize;
     // Selection methods

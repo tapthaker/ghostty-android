@@ -29,6 +29,17 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
+ * Microphone indicator state for always-on voice input.
+ * Used by the host app to show voice recognition status in the terminal view.
+ */
+enum class MicIndicatorState {
+    OFF,        // Hidden - no indicator shown
+    IDLE,       // Blue - connected, waiting for speech
+    ACTIVE,     // Green with pulse - speech detected, actively transcribing
+    ERROR       // Red - error state
+}
+
+/**
  * Unified listener for terminal events.
  * Handles surface lifecycle, keyboard gestures, and other terminal events.
  */
@@ -235,6 +246,9 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     // Choreographer for driving fling animation at vsync
     private val choreographer = Choreographer.getInstance()
     private var isAnimating = false
+
+    // Microphone indicator state for always-on voice input
+    private var micIndicatorState: MicIndicatorState = MicIndicatorState.OFF
 
     // Frame callback for scroll animation
     private val scrollAnimationCallback = object : Choreographer.FrameCallback {
@@ -1084,6 +1098,34 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 requestRender()
             }
         }
+
+    /**
+     * Set the microphone indicator state for always-on voice input.
+     *
+     * The indicator appears at the top-left corner of the terminal:
+     * - OFF: Hidden
+     * - IDLE: Blue mic icon (listening, waiting for speech)
+     * - ACTIVE: Green pulsing mic icon (speech detected)
+     * - ERROR: Red mic icon (error state)
+     *
+     * @param state The microphone indicator state
+     */
+    fun setMicIndicatorState(state: MicIndicatorState) {
+        if (micIndicatorState != state) {
+            micIndicatorState = state
+            queueEvent {
+                renderer.setMicIndicatorState(state.ordinal)
+                requestRender()
+            }
+        }
+    }
+
+    /**
+     * Get the current microphone indicator state.
+     *
+     * @return Current MicIndicatorState
+     */
+    fun getMicIndicatorState(): MicIndicatorState = micIndicatorState
 
     /**
      * Set the maximum bottom offset (keyboard height).
