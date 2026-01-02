@@ -1124,6 +1124,23 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     fun isBottomOffsetExpanded(): Boolean = maxBottomOffset > 0 && bottomOffset >= maxBottomOffset
 
     /**
+     * Sync the bottom offset to a specific value without firing callbacks.
+     *
+     * Use this when syncing with external keyboard animations (e.g., system back gesture).
+     * This updates the terminal scroll position to match the keyboard height.
+     *
+     * @param offset The offset in pixels (typically keyboard height)
+     */
+    fun syncBottomOffset(offset: Float) {
+        bottomOffset = offset.coerceIn(0f, maxBottomOffset)
+        queueEvent {
+            val scrollOffset = if (shouldScrollContentWithOverlay) bottomOffset else 0f
+            renderer.setScrollPixelOffset(scrollOffset)
+            requestRender()
+        }
+    }
+
+    /**
      * Scroll to bottom if we're scrolled up while the keyboard overlay is active.
      *
      * Call this after content changes (e.g., after processInput) to ensure
