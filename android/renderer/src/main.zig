@@ -540,13 +540,14 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeProcessInput(
             return;
         };
 
-        // Feed the input to the terminal manager
-        renderer.terminal_manager.processInput(input_data) catch |err| {
+        // Feed the input to the terminal via thread-safe processInput
+        // This can be called from any thread - mutex protects terminal state
+        renderer.processInput(input_data) catch |err| {
             log.err("Failed to process input: {}", .{err});
             return;
         };
 
-        log.info("Input processed successfully: {} bytes", .{input_data.len});
+        log.debug("Input processed successfully: {} bytes", .{input_data.len});
     } else {
         log.warn("Renderer not initialized", .{});
     }

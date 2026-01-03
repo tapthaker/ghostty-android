@@ -35,8 +35,9 @@ import kotlin.math.min
 enum class MicIndicatorState {
     OFF,        // Hidden - no indicator shown
     IDLE,       // Blue - connected, waiting for speech
-    ACTIVE,     // Green with pulse - speech detected, actively transcribing
-    ERROR       // Red - error state
+    ACTIVE,     // Green with pulse - speech detected, recording/sending audio
+    ERROR,      // Red - error state
+    PROCESSING  // Amber with pulse - waiting for transcription response
 }
 
 /**

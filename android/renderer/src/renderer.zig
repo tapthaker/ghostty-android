@@ -18,10 +18,11 @@ const log = std.log.scoped(.renderer);
 
 /// Microphone indicator state for always-on voice input
 pub const MicIndicatorState = enum(u8) {
-    off = 0,    // Hidden - no indicator shown
-    idle = 1,   // Blue - connected, waiting for speech
-    active = 2, // Green with pulse - speech detected
-    err = 3,    // Red - error state
+    off = 0,        // Hidden - no indicator shown
+    idle = 1,       // Blue - connected, waiting for speech
+    active = 2,     // Green with pulse - speech detected, recording
+    err = 3,        // Red - error state
+    processing = 4, // Amber with pulse - waiting for transcription response
 };
 
 const Self = @This();
@@ -34,6 +35,10 @@ font_system: DynamicFontSystem,
 
 /// Terminal manager for VT processing
 terminal_manager: TerminalManager,
+
+/// Mutex for thread-safe access to terminal_manager
+/// Allows processInput to be called from any thread while render runs on GL thread
+terminal_mutex: std.Thread.Mutex = .{},
 
 /// Surface dimensions in pixels
 width: u32 = 0,
@@ -989,8 +994,21 @@ pub fn updateFontSize(self: *Self, new_font_size: u32) !void {
     try self.syncFromTerminal();
 }
 
-/// Update renderer buffers from terminal state
+/// Process VT input in a thread-safe manner.
+/// Can be called from any thread - will acquire mutex and process input.
+/// Note: This does NOT sync to GPU - that happens in the render loop.
+pub fn processInput(self: *Self, data: []const u8) !void {
+    self.terminal_mutex.lock();
+    defer self.terminal_mutex.unlock();
+    try self.terminal_manager.processInput(data);
+}
+
+/// Update renderer buffers from terminal state (thread-safe).
+/// Called from the GL render loop.
 pub fn syncFromTerminal(self: *Self) !void {
+    self.terminal_mutex.lock();
+    defer self.terminal_mutex.unlock();
+
     // Extract cell data from terminal
     const cells = try screen_extractor.extractCells(
         self.allocator,
@@ -1176,16 +1194,23 @@ pub fn syncFromTerminal(self: *Self) !void {
     try self.syncUniforms();
 }
 
-/// Process VT input and sync to renderer
+/// Process VT input and sync to renderer (legacy API for GL thread usage).
+/// For thread-safe input processing from any thread, use processInput() instead.
 /// Respects synchronized output mode (ESC[?2026h/l) - only syncs when mode is inactive.
 /// This allows batched updates to complete before rendering.
 pub fn processTerminalInput(self: *Self, data: []const u8) !void {
-    try self.terminal_manager.processInput(data);
+    // Use thread-safe processInput
+    try self.processInput(data);
 
     // Only sync after processing if synchronized output mode is not active.
     // If the input contained ESC[?2026l (end sync), the mode will be off now,
     // and we'll sync the complete batched state.
-    if (!self.terminal_manager.isSynchronizedOutputActive()) {
+    // Note: This check is safe because render loop also checks before syncing.
+    self.terminal_mutex.lock();
+    const sync_active = self.terminal_manager.isSynchronizedOutputActive();
+    self.terminal_mutex.unlock();
+
+    if (!sync_active) {
         try self.syncFromTerminal();
     }
 }
@@ -1285,8 +1310,8 @@ pub fn setMicIndicatorState(self: *Self, state: u8) void {
     const new_state = std.meta.intToEnum(MicIndicatorState, state) catch .off;
     log.info("setMicIndicatorState: {} -> {}", .{ self.mic_indicator_state, new_state });
     self.mic_indicator_state = new_state;
-    // Reset pulse animation when state changes
-    if (new_state == .active) {
+    // Reset pulse animation when state changes to active or processing
+    if (new_state == .active or new_state == .processing) {
         self.mic_pulse_progress = 0.0;
     }
 }
@@ -1408,9 +1433,11 @@ fn syncMicIndicator(self: *Self) !void {
         return;
     }
 
-    // Update pulse animation progress for active state
-    if (self.mic_indicator_state == .active) {
-        self.mic_pulse_progress += 0.05; // About 20 frames per pulse cycle
+    // Update pulse animation progress for active and processing states
+    if (self.mic_indicator_state == .active or self.mic_indicator_state == .processing) {
+        // Processing pulses faster (0.08) than active (0.05)
+        const pulse_speed: f32 = if (self.mic_indicator_state == .processing) 0.08 else 0.05;
+        self.mic_pulse_progress += pulse_speed;
         if (self.mic_pulse_progress > 1.0) {
             self.mic_pulse_progress = 0.0;
         }
@@ -1431,6 +1458,11 @@ fn syncMicIndicator(self: *Self) !void {
             break :blk [4]u8{ 76, 175, 80, pulse_alpha }; // Green (#4CAF50) with pulsing alpha
         },
         .err => [4]u8{ 244, 67, 54, 255 }, // Red (#F44336)
+        .processing => blk: {
+            // Pulse effect: interpolate alpha based on progress (faster pulse)
+            const pulse_alpha: u8 = @intFromFloat(200.0 + 55.0 * @sin(self.mic_pulse_progress * std.math.pi * 2.0));
+            break :blk [4]u8{ 255, 152, 0, pulse_alpha }; // Amber (#FF9800) with pulsing alpha
+        },
     };
 
     // Background color (dark semi-transparent)
