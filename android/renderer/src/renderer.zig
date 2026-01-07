@@ -678,21 +678,11 @@ pub fn render(self: *Self) !void {
         if (valid_count > 0) {
             const min_ms = @as(f32, @floatFromInt(min_time)) / 1_000_000.0;
             const max_ms = @as(f32, @floatFromInt(max_time)) / 1_000_000.0;
-            const avg_ms = @as(f32, @floatFromInt(sum_time)) / @as(f32, @floatFromInt(valid_count)) / 1_000_000.0;
             const jitter_ms = max_ms - min_ms;
 
             // Store for display in FPS overlay
             self.current_jitter_ms = jitter_ms;
             self.current_max_ms = max_ms;
-
-            log.info("FRAME TIMING: FPS={d}, min={d:.1}ms, max={d:.1}ms, avg={d:.1}ms, jitter={d:.1}ms, slow_frames={d}", .{
-                self.current_fps,
-                min_ms,
-                max_ms,
-                avg_ms,
-                jitter_ms,
-                self.slow_frame_count,
-            });
         }
 
         self.frame_count = 0;
