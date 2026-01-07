@@ -170,11 +170,7 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         private const val TWO_FINGER_TAP_MAX_TIME_MS = 200L
         private const val TWO_FINGER_DOUBLE_TAP_TIMEOUT_MS = 300L
 
-        // Ripple effect configuration (rendering done in OpenGL shader)
-        private const val RIPPLE_DURATION_MS = 300L
-
-        // Sweep effect configuration (rendering done in OpenGL shader)
-        private const val SWEEP_DURATION_MS = 250L
+        // Sweep direction constants (animation timing is managed in native renderer)
         private const val SWEEP_UP = 1
         private const val SWEEP_DOWN = 2
     }
@@ -232,13 +228,7 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     private var selectionStartX = 0f
     private var selectionStartY = 0f
 
-    // Ripple effect state (animation driven by Choreographer, rendering by OpenGL)
-    private var isRippleAnimating = false
-    private var rippleStartTime = 0L
-
-    // Sweep effect state (animation driven by Choreographer, rendering by OpenGL)
-    private var isSweepAnimating = false
-    private var sweepStartTime = 0L
+    // Animation state is now managed entirely in the native renderer
 
     // VelocityTracker for reliable two-finger swipe detection
     private var velocityTracker: VelocityTracker? = null
@@ -368,78 +358,6 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 }
             } else {
                 // Continue animation
-                choreographer.postFrameCallback(this)
-            }
-        }
-    }
-
-    // Frame callback for ripple animation (updates progress via native renderer)
-    private val rippleAnimationCallback = object : Choreographer.FrameCallback {
-        override fun doFrame(frameTimeNanos: Long) {
-            if (!isRippleAnimating) return
-
-            val elapsed = System.currentTimeMillis() - rippleStartTime
-            val rawProgress = (elapsed.toFloat() / RIPPLE_DURATION_MS).coerceIn(0f, 1f)
-
-            // Apply decelerate easing
-            val progress = bottomOffsetInterpolator.getInterpolation(rawProgress)
-
-            // Update native renderer with new progress
-            queueEvent {
-                renderer.updateRipple(progress)
-                requestRender()
-            }
-
-            if (rawProgress >= 1f) {
-                isRippleAnimating = false
-                // Clear ripple when done
-                queueEvent {
-                    renderer.updateRipple(0f)
-                    requestRender()
-                }
-            } else {
-                choreographer.postFrameCallback(this)
-            }
-        }
-    }
-
-    // Frame callback for sweep animation (updates progress via native renderer)
-    private val sweepAnimationCallback = object : Choreographer.FrameCallback {
-        private var frameCount = 0
-
-        override fun doFrame(frameTimeNanos: Long) {
-            if (!isSweepAnimating) {
-                Log.d(TAG, "SWEEP ANIM: doFrame called but isSweepAnimating=false, ignoring")
-                return
-            }
-
-            val elapsed = System.currentTimeMillis() - sweepStartTime
-            val rawProgress = (elapsed.toFloat() / SWEEP_DURATION_MS).coerceIn(0f, 1f)
-
-            // Apply decelerate easing
-            val progress = bottomOffsetInterpolator.getInterpolation(rawProgress)
-
-            frameCount++
-            if (frameCount == 1 || rawProgress >= 1f) {
-                Log.d(TAG, "SWEEP ANIM: Frame $frameCount, progress=${(progress * 100).toInt()}%")
-            }
-
-            // Update native renderer with new progress
-            queueEvent {
-                renderer.updateSweep(progress)
-                requestRender()
-            }
-
-            if (rawProgress >= 1f) {
-                Log.d(TAG, "SWEEP ANIM: Animation complete after $frameCount frames")
-                frameCount = 0
-                isSweepAnimating = false
-                // Clear sweep when done
-                queueEvent {
-                    renderer.updateSweep(0f)
-                    requestRender()
-                }
-            } else {
                 choreographer.postFrameCallback(this)
             }
         }
@@ -824,17 +742,12 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
     /**
      * Start a Material Design ripple effect at the specified coordinates.
-     * The ripple is rendered in OpenGL; this method initiates the animation.
+     * The ripple is rendered in OpenGL; animation timing is driven by the GL render loop.
      *
      * @param x X coordinate of ripple center (touch location)
      * @param y Y coordinate of ripple center (touch location)
      */
     private fun startRippleEffect(x: Float, y: Float) {
-        Log.d(TAG, "startRippleEffect at ($x, $y)")
-        if (isRippleAnimating) {
-            choreographer.removeFrameCallback(rippleAnimationCallback)
-        }
-
         // Max radius = distance to farthest corner
         val corners = listOf(
             kotlin.math.hypot(x.toDouble(), y.toDouble()),
@@ -844,44 +757,24 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
         )
         val maxRadius = corners.maxOrNull()?.toFloat() ?: 0f
 
-        // Start ripple in native renderer
+        // Start ripple - animation is driven by the GL render loop
         queueEvent {
             renderer.startRipple(x, y, maxRadius)
-            requestRender()
         }
-
-        // Start animation loop
-        rippleStartTime = System.currentTimeMillis()
-        isRippleAnimating = true
-        choreographer.postFrameCallback(rippleAnimationCallback)
     }
 
     /**
      * Start a sweep effect in the given direction.
      * The sweep is a horizontal bar that moves across the screen for gesture feedback.
+     * Animation timing is driven by the GL render loop.
      *
      * @param direction SWEEP_UP (1) for bottom-to-top, SWEEP_DOWN (2) for top-to-bottom
      */
     private fun startSweepEffect(direction: Int) {
-        Log.d(TAG, "SWEEP ANIM: startSweepEffect direction=$direction, wasAnimating=$isSweepAnimating")
-        if (isSweepAnimating) {
-            Log.d(TAG, "SWEEP ANIM: Interrupting previous animation")
-            choreographer.removeFrameCallback(sweepAnimationCallback)
-        }
-
-        // Start sweep in native renderer
-        Log.d(TAG, "SWEEP ANIM: Queueing native startSweep")
+        // Start sweep - animation is driven by the GL render loop
         queueEvent {
-            Log.d(TAG, "SWEEP ANIM: Calling renderer.startSweep($direction)")
             renderer.startSweep(direction)
-            requestRender()
         }
-
-        // Start animation loop
-        sweepStartTime = System.currentTimeMillis()
-        isSweepAnimating = true
-        Log.d(TAG, "SWEEP ANIM: Posting frame callback")
-        choreographer.postFrameCallback(sweepAnimationCallback)
     }
 
     /**
@@ -1091,7 +984,7 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
      * When enabled, the current frames per second is rendered at the
      * top-right corner of the terminal.
      */
-    var showFps: Boolean = true
+    var showFps: Boolean = false
         set(value) {
             field = value
             queueEvent {
@@ -1099,6 +992,20 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
                 requestRender()
             }
         }
+
+    /**
+     * Show the FPS monitor overlay.
+     */
+    fun showFpsMonitor() {
+        showFps = true
+    }
+
+    /**
+     * Hide the FPS monitor overlay.
+     */
+    fun hideFpsMonitor() {
+        showFps = false
+    }
 
     /**
      * Set the microphone indicator state for always-on voice input.

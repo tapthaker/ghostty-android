@@ -16,6 +16,10 @@ const screen_extractor = @import("screen_extractor.zig");
 
 const log = std.log.scoped(.renderer);
 
+/// Animation duration constants (in nanoseconds)
+const RIPPLE_DURATION_NS: i64 = 300_000_000; // 300ms
+const SWEEP_DURATION_NS: i64 = 250_000_000; // 250ms
+
 /// Microphone indicator state for always-on voice input
 pub const MicIndicatorState = enum(u8) {
     off = 0,        // Hidden - no indicator shown
@@ -104,7 +108,7 @@ num_fps_glyphs: u32 = 0,
 scroll_pixel_offset: f32 = 0.0,
 
 /// Whether to display FPS overlay
-show_fps: bool = true,
+show_fps: bool = false,
 
 /// FPS tracking fields
 last_frame_time: i64 = 0,
@@ -134,6 +138,12 @@ num_mic_glyphs: u32 = 0,
 
 /// Mic indicator pulse animation progress (0.0 to 1.0)
 mic_pulse_progress: f32 = 0.0,
+
+/// Ripple animation start time (nanoseconds, 0 = not active)
+ripple_start_time_ns: i64 = 0,
+
+/// Sweep animation start time (nanoseconds, 0 = not active)
+sweep_start_time_ns: i64 = 0,
 
 /// Cursor state for rendering (app-level state passed to cursor style helper)
 focused: bool = true,
@@ -620,6 +630,43 @@ fn syncUniforms(self: *Self) !void {
     try self.uniforms_buffer.sync(&[_]shaders.Uniforms{self.uniforms});
 }
 
+/// Update animation progress based on elapsed time.
+/// Called each frame from render() to drive ripple and sweep animations.
+fn updateAnimations(self: *Self, now: i64) void {
+    // Update ripple animation
+    if (self.ripple_start_time_ns > 0) {
+        const elapsed = now - self.ripple_start_time_ns;
+        if (elapsed >= RIPPLE_DURATION_NS) {
+            // Animation complete - reset
+            self.uniforms.ripple_progress = 0.0;
+            self.ripple_start_time_ns = 0;
+        } else {
+            // Calculate raw progress (0.0 to 1.0)
+            const raw_progress = @as(f32, @floatFromInt(elapsed)) / @as(f32, @floatFromInt(RIPPLE_DURATION_NS));
+            // Apply decelerate easing: 1 - (1 - t)^2
+            const eased = 1.0 - (1.0 - raw_progress) * (1.0 - raw_progress);
+            self.uniforms.ripple_progress = eased;
+        }
+    }
+
+    // Update sweep animation
+    if (self.sweep_start_time_ns > 0) {
+        const elapsed = now - self.sweep_start_time_ns;
+        if (elapsed >= SWEEP_DURATION_NS) {
+            // Animation complete - reset
+            self.uniforms.sweep_progress = 0.0;
+            self.uniforms.sweep_direction = 0;
+            self.sweep_start_time_ns = 0;
+        } else {
+            // Calculate raw progress (0.0 to 1.0)
+            const raw_progress = @as(f32, @floatFromInt(elapsed)) / @as(f32, @floatFromInt(SWEEP_DURATION_NS));
+            // Apply decelerate easing: 1 - (1 - t)^2
+            const eased = 1.0 - (1.0 - raw_progress) * (1.0 - raw_progress);
+            self.uniforms.sweep_progress = eased;
+        }
+    }
+}
+
 /// Render a frame
 pub fn render(self: *Self) !void {
     // Update FPS counter
@@ -710,6 +757,9 @@ pub fn render(self: *Self) !void {
     // Clear with transparent black (will be overwritten by bg_color shader)
     gl.clearColor(0.0, 0.0, 0.0, 0.0);
     gl.clear(gl.GL_COLOR_BUFFER_BIT);
+
+    // Update animation progress (ripple, sweep) based on elapsed time
+    self.updateAnimations(now);
 
     // Ensure uniforms are up to date
     try self.syncUniforms();
@@ -1433,7 +1483,6 @@ fn syncMicIndicator(self: *Self) !void {
         }
     }
 
-    // Position at top-left (row 0, column 0)
     // Use a mic icon character (🎤 = U+1F3A4 might not render well, use a simpler indicator)
     // We'll use ● (U+25CF) or ◉ (U+25C9) as a simple filled circle indicator
     const indicator_char: u32 = 0x25CF; // ● Black circle
@@ -1464,11 +1513,14 @@ fn syncMicIndicator(self: *Self) !void {
     var mic_glyphs: [4]shaders.CellText = undefined;
     var glyph_count: u32 = 0;
 
+    // Position at top-right corner
+    const right_col: u16 = if (self.grid_cols > 0) self.grid_cols - 1 else 0;
+
     // Add background block (full block character)
     const block_char: u32 = 0x2588; // █ Full block character
     mic_glyphs[glyph_count] = (&self.font_system).makeCellText(
         block_char,
-        0, // column 0
+        right_col, // top-right column
         0, // row 0
         bg_color,
         attributes,
@@ -1479,7 +1531,7 @@ fn syncMicIndicator(self: *Self) !void {
     // Add the indicator glyph on top
     mic_glyphs[glyph_count] = (&self.font_system).makeCellText(
         indicator_char,
-        0, // column 0
+        right_col, // top-right column
         0, // row 0
         text_color,
         attributes,
@@ -1497,14 +1549,15 @@ fn syncMicIndicator(self: *Self) !void {
 // ============================================================================
 
 /// Start a ripple effect at the given position.
+/// Animation is driven by the render loop using nanoTimestamp.
 /// @param center_x X coordinate in screen pixels
 /// @param center_y Y coordinate in screen pixels
 /// @param max_radius Maximum radius the ripple will expand to
 pub fn startRipple(self: *Self, center_x: f32, center_y: f32, max_radius: f32) void {
-    log.info("startRipple at ({d:.1}, {d:.1}) with max_radius={d:.1}", .{ center_x, center_y, max_radius });
     self.uniforms.ripple_center = .{ center_x, center_y };
     self.uniforms.ripple_max_radius = max_radius;
-    // Progress will be updated by updateRipple
+    self.uniforms.ripple_progress = 0.0;
+    self.ripple_start_time_ns = @truncate(std.time.nanoTimestamp());
 }
 
 /// Update the ripple animation progress.
@@ -1525,11 +1578,12 @@ pub const SweepDirection = enum(u32) {
 };
 
 /// Start a sweep effect in the given direction.
+/// Animation is driven by the render loop using nanoTimestamp.
 /// @param direction 1 = sweep up (bottom to top), 2 = sweep down (top to bottom)
 pub fn startSweep(self: *Self, direction: u32) void {
-    log.info("startSweep direction={}", .{direction});
     self.uniforms.sweep_direction = direction;
-    // Progress will be updated by updateSweep
+    self.uniforms.sweep_progress = 0.0;
+    self.sweep_start_time_ns = @truncate(std.time.nanoTimestamp());
 }
 
 /// Update the sweep animation progress.
