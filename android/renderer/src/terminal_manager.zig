@@ -18,6 +18,11 @@ allocator: Allocator,
 terminal: ghostty_vt.Terminal,
 render_state: ghostty_vt.RenderState = .empty,
 
+/// Saved viewport anchor for scroll restoration across resize.
+/// This Pin tracks the content at the top-left of the viewport,
+/// allowing us to restore the scroll position after terminal resize/reflow.
+saved_viewport_anchor: ?ghostty_vt.PageList.Pin = null,
+
 /// Initialize a new terminal with the specified size
 pub fn init(allocator: Allocator, cols: u16, rows: u16) !TerminalManager {
     log.info("Initializing terminal: {}x{}", .{ cols, rows });
@@ -158,6 +163,59 @@ pub fn scrollToViewportOffset(self: *TerminalManager, row: usize) void {
     const screen = self.terminal.screens.get(.primary).?;
     screen.pages.scroll(.{ .row = row });
     log.debug("Scrolled viewport to row {}", .{row});
+}
+
+// =============================================================================
+// Viewport Anchor API (for scroll preservation across resize)
+// =============================================================================
+
+/// Save the current viewport anchor (top-left cell) for later restoration.
+/// Call this BEFORE resize operations to preserve scroll position.
+/// If the viewport is at the bottom, no anchor is saved (we want to stay at bottom).
+pub fn saveViewportAnchor(self: *TerminalManager) void {
+    // If at bottom, don't save (we want to stay at bottom for new output)
+    if (self.isViewportAtBottom()) {
+        self.saved_viewport_anchor = null;
+        log.debug("saveViewportAnchor: at bottom, not saving", .{});
+        return;
+    }
+
+    const screen = self.terminal.screens.get(.primary).?;
+    const pt = point.Point{ .viewport = .{ .x = 0, .y = 0 } };
+
+    if (screen.pages.pin(pt)) |pin| {
+        self.saved_viewport_anchor = pin;
+        log.debug("saveViewportAnchor: saved pin for viewport top-left", .{});
+    } else {
+        self.saved_viewport_anchor = null;
+        log.warn("saveViewportAnchor: failed to get pin for (0,0)", .{});
+    }
+}
+
+/// Restore the viewport to show the previously saved anchor.
+/// Call this AFTER resize operations to restore scroll position.
+/// The saved anchor is cleared after restoration.
+pub fn restoreViewportAnchor(self: *TerminalManager) void {
+    const anchor = self.saved_viewport_anchor orelse {
+        log.debug("restoreViewportAnchor: no saved anchor, staying at current position", .{});
+        return;
+    };
+
+    // Clear saved anchor
+    self.saved_viewport_anchor = null;
+
+    var screen = self.terminal.screens.get(.primary).?;
+
+    // Convert Pin to screen coordinates (absolute row from top of buffer)
+    const screen_pt = screen.pages.pointFromPin(.screen, anchor) orelse {
+        log.warn("restoreViewportAnchor: pin no longer valid after resize", .{});
+        return;
+    };
+
+    // Scroll so this row is at the top of the viewport
+    const row = screen_pt.screen.y;
+    screen.pages.scroll(.{ .row = row });
+    log.debug("restoreViewportAnchor: scrolled to row {}", .{row});
 }
 
 /// Update render state from terminal - call before extracting cursor style

@@ -813,6 +813,60 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetScrollPixel
     }
 }
 
+/// Save viewport anchor for scroll restoration across resize
+/// Call this BEFORE resize operations.
+/// Java signature: void nativeSaveViewportAnchor()
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSaveViewportAnchor(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) void {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
+        return;
+    }
+
+    if (state.renderer) |*renderer| {
+        renderer.saveViewportAnchor();
+        log.debug("Saved viewport anchor for scroll restoration", .{});
+    }
+}
+
+/// Restore viewport from saved anchor after resize
+/// Call this AFTER resize operations.
+/// Java signature: void nativeRestoreViewportAnchor()
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeRestoreViewportAnchor(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) void {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
+        return;
+    }
+
+    if (state.renderer) |*renderer| {
+        renderer.restoreViewportAnchor();
+        log.debug("Restored viewport from saved anchor", .{});
+    }
+}
+
 /// Start a ripple effect at the given position
 /// Java signature: void nativeStartRipple(float centerX, float centerY, float maxRadius)
 export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeStartRipple(

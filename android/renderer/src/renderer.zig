@@ -1305,6 +1305,18 @@ pub fn scrollToViewportOffset(self: *Self, row: usize) void {
     self.terminal_manager.scrollToViewportOffset(row);
 }
 
+/// Save the current viewport anchor for scroll preservation across resize.
+/// Call this BEFORE resize operations.
+pub fn saveViewportAnchor(self: *Self) void {
+    self.terminal_manager.saveViewportAnchor();
+}
+
+/// Restore the viewport to the previously saved anchor after resize.
+/// Call this AFTER resize operations.
+pub fn restoreViewportAnchor(self: *Self) void {
+    self.terminal_manager.restoreViewportAnchor();
+}
+
 // ============================================================================
 // Cursor State API (for future JNI binding)
 // ============================================================================

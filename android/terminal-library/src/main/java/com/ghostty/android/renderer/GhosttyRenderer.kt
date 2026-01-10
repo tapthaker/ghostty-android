@@ -77,6 +77,8 @@ class GhosttyRenderer(
     private external fun nativeScrollToBottom()
     private external fun nativeScrollToViewportOffset(row: Int)
     private external fun nativeSetScrollPixelOffset(offset: Float)
+    private external fun nativeSaveViewportAnchor()
+    private external fun nativeRestoreViewportAnchor()
 
     // Ripple effect native methods
     private external fun nativeStartRipple(centerX: Float, centerY: Float, maxRadius: Float)
@@ -171,7 +173,14 @@ class GhosttyRenderer(
         lastDpi = dpi
 
         try {
+            // Save scroll position BEFORE resize (for orientation change preservation)
+            // This is a no-op if renderer not initialized yet or viewport is at bottom
+            nativeSaveViewportAnchor()
+
             nativeOnSurfaceChanged(width, height, dpi, pendingFontSize)
+
+            // Restore scroll position AFTER resize
+            nativeRestoreViewportAnchor()
 
             // Get grid size and notify callback only if size changed
             val gridSize = getGridSize()
@@ -280,9 +289,15 @@ class GhosttyRenderer(
         }
 
         try {
+            // Save scroll position BEFORE font size change (preserves position across reflow)
+            nativeSaveViewportAnchor()
+
             // Call nativeOnSurfaceChanged with new font size to trigger full recalculation
             // This ensures grid dimensions are updated based on new font metrics
             nativeOnSurfaceChanged(lastSurfaceWidth, lastSurfaceHeight, lastDpi, fontSize)
+
+            // Restore scroll position AFTER font size change
+            nativeRestoreViewportAnchor()
 
             // Get the new grid size after recalculation
             val gridSize = getGridSize()
@@ -459,6 +474,31 @@ class GhosttyRenderer(
             nativeSetScrollPixelOffset(offset)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeSetScrollPixelOffset", e)
+        }
+    }
+
+    /**
+     * Save the current viewport anchor for scroll preservation across resize.
+     * Call this BEFORE resize operations (e.g., orientation change, font size change).
+     * If the viewport is at the bottom, no anchor is saved (we want to stay at bottom).
+     */
+    fun saveViewportAnchor() {
+        try {
+            nativeSaveViewportAnchor()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeSaveViewportAnchor", e)
+        }
+    }
+
+    /**
+     * Restore the viewport to the previously saved anchor after resize.
+     * Call this AFTER resize operations. The saved anchor is cleared after restoration.
+     */
+    fun restoreViewportAnchor() {
+        try {
+            nativeRestoreViewportAnchor()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeRestoreViewportAnchor", e)
         }
     }
 
