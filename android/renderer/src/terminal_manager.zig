@@ -419,3 +419,55 @@ pub fn getHyperlinkAtCell(self: *TerminalManager, col: u16, row: u16) !?[]const 
 
     return result;
 }
+
+// =============================================================================
+// Viewport Text API (for voice command environment detection)
+// =============================================================================
+
+/// Get the visible viewport content as plain text.
+///
+/// This is used by the voice command interceptor to detect the terminal environment
+/// (e.g., Claude Code, bash) based on what's visible on screen. Plain text is used
+/// for reliable pattern matching across all architectures.
+///
+/// Returns a null-terminated string containing the viewport content.
+/// Caller owns the returned memory and must free it with the allocator.
+pub fn getViewportTextVT(self: *TerminalManager) !?[:0]const u8 {
+    var screen = self.terminal.screens.get(.primary) orelse return null;
+
+    // Get viewport dimensions
+    const cols = self.terminal.cols;
+    const rows = self.terminal.rows;
+
+    if (cols == 0 or rows == 0) {
+        log.warn("getViewportTextVT: Invalid terminal size {}x{}", .{ cols, rows });
+        return null;
+    }
+
+    // Create a selection covering the entire viewport
+    // Viewport coordinates: (0,0) to (cols-1, rows-1)
+    // Note: 'point' and 'Selection' are imported at module level
+
+    const tl_pt = point.Point{ .viewport = .{ .x = 0, .y = 0 } };
+    const br_pt = point.Point{ .viewport = .{ .x = cols - 1, .y = rows - 1 } };
+
+    // Convert points to pins
+    const tl_pin = screen.pages.pin(tl_pt) orelse {
+        log.warn("getViewportTextVT: Could not get top-left pin", .{});
+        return null;
+    };
+    const br_pin = screen.pages.pin(br_pt) orelse {
+        log.warn("getViewportTextVT: Could not get bottom-right pin", .{});
+        return null;
+    };
+
+    // Create selection from pins
+    const sel = Selection.init(tl_pin, br_pin, false);
+
+    // Use selectionString which handles the formatting internally
+    // Using plain text for reliable cross-architecture support
+    return try screen.selectionString(self.allocator, .{
+        .sel = sel,
+        .trim = false, // Don't trim - we want all content for pattern matching
+    });
+}

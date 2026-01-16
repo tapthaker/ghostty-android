@@ -1307,6 +1307,50 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetSelectionBo
 }
 
 // ============================================================================
+// Viewport Text JNI Methods (for voice command detection)
+// ============================================================================
+
+/// Get the visible viewport content as text with VT/ANSI sequences preserved.
+/// This is used by voice command interceptor for environment detection.
+/// Java signature: String nativeGetViewportTextVT()
+/// Returns the viewport text with SGR sequences or null on error
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetViewportTextVT(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+) c.jstring {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return null;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return null;
+    };
+
+    if (!state.initialized) {
+        return null;
+    }
+
+    if (state.renderer) |*renderer| {
+        const text = renderer.terminal_manager.getViewportTextVT() catch |err| {
+            log.err("Failed to get viewport text VT: {}", .{err});
+            return null;
+        };
+
+        if (text) |txt| {
+            defer gpa.allocator().free(txt);
+            return jni.newJString(env, txt) catch |err| {
+                log.err("Failed to create JNI string for viewport text VT: {}", .{err});
+                return null;
+            };
+        }
+    }
+
+    return null;
+}
+
+// ============================================================================
 // Hyperlink JNI Methods
 // ============================================================================
 
@@ -1390,6 +1434,8 @@ comptime {
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeHasSelection;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetSelectionText;
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetSelectionBounds;
+    // Viewport text (with VT sequences for voice command detection)
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetViewportTextVT;
     // Hyperlink methods
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetHyperlinkAtCell;
 }

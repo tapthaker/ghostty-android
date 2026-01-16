@@ -109,6 +109,9 @@ class GhosttyRenderer(
     // Hyperlink native methods
     private external fun nativeGetHyperlinkAtCell(col: Int, row: Int): String?
 
+    // Viewport text native method (with VT/ANSI sequences for voice command detection)
+    private external fun nativeGetViewportTextVT(): String?
+
     // Callback invoked after surface changes with new grid size
     private var onSurfaceChangedCallback: ((cols: Int, rows: Int) -> Unit)? = null
 
@@ -739,6 +742,28 @@ class GhosttyRenderer(
             nativeGetHyperlinkAtCell(col, row)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeGetHyperlinkAtCell", e)
+            null
+        }
+    }
+
+    // ============================================================================
+    // Viewport Text API (for voice command environment detection)
+    // ============================================================================
+
+    /**
+     * Get the visible viewport content as text with VT/ANSI sequences preserved.
+     *
+     * This is used by the voice command interceptor to detect the terminal environment
+     * (e.g., Claude Code, bash) based on what's visible on screen. The ANSI sequences
+     * (colors, bold, etc.) are preserved to enable richer pattern matching.
+     *
+     * @return The visible viewport text with SGR sequences, or null if unable to extract
+     */
+    fun getViewportText(): String? {
+        return try {
+            nativeGetViewportTextVT()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in getViewportText", e)
             null
         }
     }
