@@ -21,6 +21,8 @@ import android.view.ViewConfiguration
 import android.view.animation.DecelerateInterpolator
 import android.widget.EdgeEffect
 import android.widget.OverScroller
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.ghostty.android.R
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
@@ -188,6 +190,10 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
     // Interactive mode - when false, touch events are not processed
     private var isInteractive = true
+
+    // System gesture insets - touches in these zones pass through to system for back gesture
+    private var systemGestureInsetLeft = 0
+    private var systemGestureInsetRight = 0
 
     // Visual scroll pixel offset for smooth sub-row animation (0 to fontLineSpacing)
     private var scrollPixelOffset = 0f
@@ -365,6 +371,15 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
 
     init {
         Log.d(TAG, "Initializing Ghostty GL Surface View")
+
+        // Listen for system gesture insets to allow back gesture to work at screen edges
+        ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
+            val gestureInsets = insets.getInsets(WindowInsetsCompat.Type.systemGestures())
+            systemGestureInsetLeft = gestureInsets.left
+            systemGestureInsetRight = gestureInsets.right
+            Log.d(TAG, "System gesture insets: left=$systemGestureInsetLeft, right=$systemGestureInsetRight")
+            insets
+        }
 
         // Parse XML attributes if present
         val resolvedFontSize = if (attrs != null) {
@@ -881,11 +896,25 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     }
 
     /**
+     * Check if an X coordinate is within the system gesture zones (screen edges).
+     * Touches in these zones should pass through to allow system back gesture.
+     */
+    private fun isInSystemGestureZone(x: Float): Boolean {
+        return x < systemGestureInsetLeft || x > (width - systemGestureInsetRight)
+    }
+
+    /**
      * Handle touch events for scrolling and gestures.
      */
     override fun onTouchEvent(event: MotionEvent): Boolean {
         // If not interactive, don't process touch events
         if (!isInteractive) {
+            return false
+        }
+
+        // Pass through touches that start in system gesture zones
+        // This allows the system back gesture to work reliably
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && isInSystemGestureZone(event.x)) {
             return false
         }
 
