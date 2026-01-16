@@ -123,13 +123,16 @@ echo "  Zig Target: $ZIG_TARGET"
 
 cd android/renderer
 
-# Clean previous build artifacts to avoid using cached builds for wrong architecture
-rm -rf zig-out .zig-cache
+# Use per-ABI cache directories to enable incremental builds
+# This avoids wiping the cache and rebuilding from scratch each time
+RENDERER_CACHE_DIR="../../build/renderer-cache-${ABI}"
+mkdir -p "$RENDERER_CACHE_DIR"
 
-# Build the renderer with Zig
+# Build the renderer with Zig using per-ABI cache
 nix-shell ../../libghostty-vt/shell.nix --run "zig build \
     -Dtarget=${ZIG_TARGET}.${API_LEVEL} \
     -Doptimize=ReleaseFast \
+    --cache-dir $RENDERER_CACHE_DIR \
     --libc ../../${LIBC_FILE}" 2>&1 | tee "../../build/build-renderer-${ABI}.log"
 
 echo ""
