@@ -435,33 +435,15 @@ pub fn getHyperlinkAtCell(self: *TerminalManager, col: u16, row: u16) !?[]const 
 pub fn getViewportTextVT(self: *TerminalManager) !?[:0]const u8 {
     var screen = self.terminal.screens.get(.primary) orelse return null;
 
-    // Get viewport dimensions
-    const cols = self.terminal.cols;
-    const rows = self.terminal.rows;
-
-    if (cols == 0 or rows == 0) {
-        log.warn("getViewportTextVT: Invalid terminal size {}x{}", .{ cols, rows });
-        return null;
-    }
-
-    // Create a selection covering the entire viewport
-    // Viewport coordinates: (0,0) to (cols-1, rows-1)
-    // Note: 'point' and 'Selection' are imported at module level
-
-    const tl_pt = point.Point{ .viewport = .{ .x = 0, .y = 0 } };
-    const br_pt = point.Point{ .viewport = .{ .x = cols - 1, .y = rows - 1 } };
-
-    // Convert points to pins
-    const tl_pin = screen.pages.pin(tl_pt) orelse {
-        log.warn("getViewportTextVT: Could not get top-left pin", .{});
-        return null;
-    };
-    const br_pin = screen.pages.pin(br_pt) orelse {
+    // Get the visible viewport bounds using the proper PageList API
+    // This returns only the visible portion, not the entire scrollback buffer
+    const tl_pin = screen.pages.getTopLeft(.viewport);
+    const br_pin = screen.pages.getBottomRight(.viewport) orelse {
         log.warn("getViewportTextVT: Could not get bottom-right pin", .{});
         return null;
     };
 
-    // Create selection from pins
+    // Create selection from viewport bounds
     const sel = Selection.init(tl_pin, br_pin, false);
 
     // Use selectionString which handles the formatting internally

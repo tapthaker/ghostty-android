@@ -109,6 +109,35 @@ command nix-shell --command "make install"
 adb exec-out screencap -p > /tmp/screenshot.png
 ```
 
+## Publishing AAR for AFK
+
+When changes are made to the Ghostty renderer (terminal_manager.zig, main.zig, etc.) that AFK depends on:
+
+**1. Bump the version** in `android/terminal-library/build.gradle.kts`:
+```kotlin
+version = "0.7.0"  // Increment this
+```
+
+**2. Build and publish the AAR:**
+```bash
+command nix-shell --command "make publish-aar"
+```
+
+**3. Update AFK's dependency** in `/home/tapan/Code/afk/android/app/build.gradle.kts`:
+```kotlin
+implementation("com.ghostty:terminal-library:0.7.0")  // Match the version
+```
+
+**4. Rebuild AFK:**
+```bash
+cd /home/tapan/Code/afk
+command nix-shell --command "make android"
+```
+
+**Version History:**
+- 0.7.0 - Fixed viewport text extraction to use proper Ghostty API (getTopLeft/getBottomRight .viewport)
+- 0.6.0 - Added getViewportTextVT for voice command environment detection
+
 **DO ✓**
 - Use `command nix-shell --command "make ..."` syntax
 - Use make targets
