@@ -1,7 +1,7 @@
 # Ghostty Android - Makefile
 # Build system for cross-compiling libghostty-vt to Android targets
 
-.PHONY: help setup build-native build-android android android-studio clean clean-all check-env check-nix-shell test test-list test-feedback test-feedback-list test-feedback-id build-aar publish-aar clean-aar
+.PHONY: help setup build-native build-android android android-studio clean clean-all clean-vt-cache check-env check-nix-shell test test-list test-feedback test-feedback-list test-feedback-id build-aar publish-aar clean-aar
 
 # Configuration
 GHOSTTY_REPO = https://github.com/ghostty-org/ghostty.git
@@ -79,6 +79,7 @@ help:
 	@echo -e "$(COLOR_GREEN)Maintenance:$(COLOR_RESET)"
 	@echo -e "  $(COLOR_BOLD)make clean$(COLOR_RESET)          - Clean build artifacts"
 	@echo -e "  $(COLOR_BOLD)make clean-all$(COLOR_RESET)      - Clean everything including Ghostty"
+	@echo -e "  $(COLOR_BOLD)make clean-vt-cache$(COLOR_RESET) - Clear cached libghostty-vt builds"
 	@echo ""
 	@echo -e "$(COLOR_YELLOW)Configuration:$(COLOR_RESET)"
 	@echo "  ANDROID_HOME:       $(ANDROID_HOME)"
@@ -86,6 +87,9 @@ help:
 	@echo "  ANDROID_TARGET_API: $(ANDROID_TARGET_API)"
 	@echo "  ANDROID_MIN_API:    $(ANDROID_MIN_API)"
 	@echo "  ANDROID_ABIS:       $(ANDROID_ABIS)"
+	@echo ""
+	@echo -e "$(COLOR_YELLOW)Environment Flags:$(COLOR_RESET)"
+	@echo "  FORCE_VT_BUILD=1    Force rebuild of libghostty-vt (ignore cache)"
 
 ## check-env: Verify environment variables are set
 check-env: check-nix-shell
@@ -134,7 +138,7 @@ build-abi:
 		exit 1; \
 	fi
 	@output_dir="$(ANDROID_LIBS_DIR)/$(ABI)"; \
-	ANDROID_MIN_API=$(ANDROID_MIN_API) ANDROID_NDK_ROOT=$(ANDROID_NDK_ROOT) \
+	ANDROID_MIN_API=$(ANDROID_MIN_API) ANDROID_NDK_ROOT=$(ANDROID_NDK_ROOT) FORCE_VT_BUILD=$(FORCE_VT_BUILD) \
 		./scripts/build-android-abi.sh $(ABI) $$output_dir
 
 ## android-studio: Open project in Android Studio (NixOS recommended)
@@ -171,6 +175,12 @@ clean-aar:
 	@echo -e "$(COLOR_BLUE)Cleaning AAR build artifacts...$(COLOR_RESET)"
 	cd android && ./gradlew :terminal-library:clean
 	@echo -e "$(COLOR_GREEN)✓ AAR clean complete$(COLOR_RESET)"
+
+## clean-vt-cache: Clear cached libghostty-vt builds
+clean-vt-cache:
+	@echo -e "$(COLOR_BLUE)Cleaning libghostty-vt cache...$(COLOR_RESET)"
+	rm -rf $(BUILD_DIR)/vt-cache
+	@echo -e "$(COLOR_GREEN)✓ Cache cleared$(COLOR_RESET)"
 
 ## android: Build native libraries, Android APK, install to device, and launch (one-stop command)
 android: check-nix-shell

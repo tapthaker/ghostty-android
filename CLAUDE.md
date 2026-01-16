@@ -38,8 +38,9 @@ make test-feedback-id TEST_ID=<id>   # Run specific test
 make test-feedback                   # Run all tests (interactive)
 
 # Maintenance
-make clean       # Clean build artifacts
-make clean-all   # Clean everything
+make clean          # Clean build artifacts
+make clean-all      # Clean everything
+make clean-vt-cache # Clear libghostty-vt build cache
 ```
 
 ## Essential Info
@@ -48,6 +49,14 @@ make clean-all   # Clean everything
 - Makefile orchestrates everything
 - Two nix-shells: project (Android/Java) + Ghostty (Zig)
 - Auto-detects if not in nix-shell and shows error
+- **Build caching:** libghostty-vt is cached by submodule commit hash (saves ~50-60% build time)
+
+**Build Caching:**
+- `libghostty-vt.so` is cached in `build/vt-cache/` by commit hash
+- Cache is used when: submodule is clean AND cached file exists for current commit
+- Cache is skipped when: submodule has uncommitted changes (dirty)
+- Force rebuild: `FORCE_VT_BUILD=1 make build-native`
+- Clear cache: `make clean-vt-cache`
 
 **Test IDs:** basic_colors_fg, basic_colors_bg, 256_colors, rgb_colors, text_attributes, combined_attributes, cursor_position, cursor_movement, cursor_visibility, cursor_styles, screen_clear, line_operations, scrollback, line_wrap_basic, line_wrap_word_boundary, line_wrap_ansi_colors, utf8_basic, emoji, box_drawing, special_chars, double_width, combining_chars, prompt_symbols
 

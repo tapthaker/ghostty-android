@@ -55,35 +55,65 @@ mkdir -p "$BUILD_DIR"
 LIBC_FILE="$BUILD_DIR/android-${ABI}-libc.txt"
 ./scripts/generate-android-libc.sh "$ABI" "$LIBC_FILE"
 
-# Enter Ghostty directory
-cd libghostty-vt
+# Cache directory for prebuilt libghostty-vt
+VT_CACHE_DIR="$BUILD_DIR/vt-cache"
+mkdir -p "$VT_CACHE_DIR"
 
-# The key is to provide Zig with Android NDK libc configuration
-# Disable SIMD to avoid C++ dependencies that don't compile well for Android
-# Use --libc flag to specify the libc configuration file
-# lib-vt is the VT library without app/rendering dependencies
-nix-shell --run "zig build lib-vt \
-    -Dtarget=${ZIG_TARGET}.${API_LEVEL} \
-    -Doptimize=ReleaseFast \
-    -Dapp-runtime=none \
-    -Dsimd=false \
-    -Dcpu=baseline \
-    --libc ../${LIBC_FILE}" 2>&1 | tee "../build/build-${ABI}.log"
+# Check if libghostty-vt submodule is dirty or has changed
+VT_COMMIT=$(git -C libghostty-vt rev-parse HEAD 2>/dev/null || echo "unknown")
+VT_DIRTY=$(git -C libghostty-vt status --porcelain 2>/dev/null)
+VT_CACHE_FILE="$VT_CACHE_DIR/libghostty-vt-${ABI}-${VT_COMMIT}.so"
 
-echo ""
-echo "Build log saved to: build/build-${ABI}.log"
+NEED_VT_BUILD=true
 
-# Copy the resulting library
-if [ -f "zig-out/lib/libghostty-vt.so" ]; then
-    cp zig-out/lib/libghostty-vt.so "../${OUTPUT_DIR}/"
-    echo "✓ Built successfully: ${OUTPUT_DIR}/libghostty-vt.so"
+# Check for FORCE_VT_BUILD flag
+if [ "$FORCE_VT_BUILD" = "1" ]; then
+    echo "→ Forcing libghostty-vt rebuild (FORCE_VT_BUILD=1)"
+elif [ -n "$VT_DIRTY" ]; then
+    echo "⚠ Submodule libghostty-vt is dirty, rebuilding"
+elif [ -f "$VT_CACHE_FILE" ]; then
+    echo "✓ Using cached libghostty-vt for $ABI (commit: ${VT_COMMIT:0:8})"
+    cp "$VT_CACHE_FILE" "$OUTPUT_DIR/libghostty-vt.so"
+    NEED_VT_BUILD=false
 else
-    echo "Error: libghostty-vt.so not found"
-    exit 1
+    echo "→ No cache found for commit ${VT_COMMIT:0:8}, building libghostty-vt"
 fi
 
-# Go back to root directory
-cd ..
+if [ "$NEED_VT_BUILD" = true ]; then
+    # Enter Ghostty directory
+    cd libghostty-vt
+
+    # The key is to provide Zig with Android NDK libc configuration
+    # Disable SIMD to avoid C++ dependencies that don't compile well for Android
+    # Use --libc flag to specify the libc configuration file
+    # lib-vt is the VT library without app/rendering dependencies
+    nix-shell --run "zig build lib-vt \
+        -Dtarget=${ZIG_TARGET}.${API_LEVEL} \
+        -Doptimize=ReleaseFast \
+        -Dapp-runtime=none \
+        -Dsimd=false \
+        -Dcpu=baseline \
+        --libc ../${LIBC_FILE}" 2>&1 | tee "../build/build-${ABI}.log"
+
+    echo ""
+    echo "Build log saved to: build/build-${ABI}.log"
+
+    # Copy the resulting library
+    if [ -f "zig-out/lib/libghostty-vt.so" ]; then
+        cp zig-out/lib/libghostty-vt.so "../${OUTPUT_DIR}/"
+        echo "✓ Built successfully: ${OUTPUT_DIR}/libghostty-vt.so"
+
+        # Cache the built library for future use
+        cp zig-out/lib/libghostty-vt.so "../${VT_CACHE_FILE}"
+        echo "✓ Cached libghostty-vt for $ABI (commit: ${VT_COMMIT:0:8})"
+    else
+        echo "Error: libghostty-vt.so not found"
+        exit 1
+    fi
+
+    # Go back to root directory
+    cd ..
+fi
 
 # Build the OpenGL ES renderer
 echo ""
