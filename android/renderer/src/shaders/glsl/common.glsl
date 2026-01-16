@@ -38,6 +38,7 @@ layout(binding = 0, std140) uniform Globals {
     uniform float sweep_progress;
     uniform uint tint_color_packed_4u8;
     uniform float tint_alpha;
+    uniform float tint_thickness;
 };
 
 // Bools

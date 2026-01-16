@@ -7,12 +7,9 @@
 
 layout(location = 0) out vec4 out_FragColor;
 
-// Accent line thickness in pixels (must match ACCENT_LINE_HEIGHT in renderer.zig)
-const float ACCENT_THICKNESS = 3.0;
-
 void main() {
     // Skip rendering if tint is disabled
-    if (tint_alpha <= 0.0) {
+    if (tint_alpha <= 0.0 || tint_thickness <= 0.0) {
         discard;
     }
 
@@ -23,7 +20,7 @@ void main() {
     float distFromTop = screen_size.y - fragCoord.y;
 
     // Only render within the accent line thickness at top edge
-    if (distFromTop > ACCENT_THICKNESS) {
+    if (distFromTop > tint_thickness) {
         discard;
     }
 
@@ -42,9 +39,7 @@ void main() {
         tintColor = linearize(tintColor);
     }
 
-    // Apply tint alpha (color's own alpha * user-specified alpha)
-    float finalAlpha = tintColor.a * tint_alpha;
-
-    // Output with PREMULTIPLIED alpha (required for GL_ONE, GL_ONE_MINUS_SRC_ALPHA blending)
-    out_FragColor = vec4(tintColor.rgb * finalAlpha, finalAlpha);
+    // Render accent line at full opacity (ignoring tint_alpha) to match card border
+    // The tint_alpha is only used to enable/disable the line (checked at top of shader)
+    out_FragColor = vec4(tintColor.rgb, 1.0);
 }

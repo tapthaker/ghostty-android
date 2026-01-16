@@ -934,8 +934,8 @@ pub fn setBackgroundColor(self: *Self, r: u8, g: u8, b: u8, a: u8) void {
     self.uniforms.bg_color_packed_4u8 = shaders.Uniforms.pack4u8(r, g, b, a);
 }
 
-/// Accent line height in pixels (must match ACCENT_THICKNESS in tint_overlay.f.glsl)
-const ACCENT_LINE_HEIGHT: f32 = 3.0;
+/// Accent line height in pixels
+const ACCENT_LINE_HEIGHT: f32 = 6.0;
 /// Padding below the accent line
 const ACCENT_LINE_PADDING: f32 = 2.0;
 
@@ -946,6 +946,9 @@ const ACCENT_LINE_PADDING: f32 = 2.0;
 pub fn setTintColor(self: *Self, color: u32, alpha: f32) void {
     self.tint_color = color;
     self.tint_alpha = alpha;
+
+    // Set the thickness uniform for the shader
+    self.uniforms.tint_thickness = ACCENT_LINE_HEIGHT;
 
     // Adjust top grid padding to make room for the accent line
     if (alpha > 0.0) {

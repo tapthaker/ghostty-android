@@ -88,6 +88,9 @@ pub const Uniforms = extern struct {
     /// Tint overlay opacity (0.0 = invisible, 1.0 = fully opaque)
     tint_alpha: f32 align(4) = 0.0,
 
+    /// Tint overlay thickness in pixels (accent line height)
+    tint_thickness: f32 align(4) = 0.0,
+
     pub const Bools = packed struct(u32) {
         /// Whether the cursor is 2 cells wide.
         cursor_wide: bool,

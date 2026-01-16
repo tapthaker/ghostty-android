@@ -110,7 +110,7 @@ publishing {
         register<MavenPublication>("release") {
             groupId = "com.ghostty"
             artifactId = "terminal-library"
-            version = "0.8.0"
+            version = "0.8.1"
 
             afterEvaluate {
                 from(components["release"])
