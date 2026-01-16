@@ -36,6 +36,8 @@ layout(binding = 0, std140) uniform Globals {
     uniform float ripple_max_radius;
     uniform uint sweep_direction;
     uniform float sweep_progress;
+    uniform uint tint_color_packed_4u8;
+    uniform float tint_alpha;
 };
 
 // Bools

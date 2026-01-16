@@ -81,6 +81,13 @@ pub const Uniforms = extern struct {
     /// Sweep effect animation progress (0.0 = start, 1.0 = end)
     sweep_progress: f32 align(4) = 0.0,
 
+    /// Tint overlay color (RGBA, 4x u8 packed into u32).
+    /// Used for session differentiation - each session gets a unique tint.
+    tint_color_packed_4u8: u32 align(4) = 0,
+
+    /// Tint overlay opacity (0.0 = invisible, 1.0 = fully opaque)
+    tint_alpha: f32 align(4) = 0.0,
+
     pub const Bools = packed struct(u32) {
         /// Whether the cursor is 2 cells wide.
         cursor_wide: bool,

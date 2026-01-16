@@ -1029,6 +1029,36 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetMicIndicato
     }
 }
 
+/// Set the tint overlay color for session differentiation
+/// Java signature: void nativeSetTintColor(int color, float alpha)
+/// @param color ARGB color packed as int (e.g., 0xFF4CAF50 for green)
+/// @param alpha Opacity from 0.0 (invisible) to 1.0 (fully opaque)
+export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetTintColor(
+    env: *c.JNIEnv,
+    obj: c.jobject,
+    color: c.jint,
+    alpha: c.jfloat,
+) void {
+    const handle = getNativeHandle(env, obj);
+
+    if (handle == 0) {
+        return;
+    }
+
+    const state = getRendererState(handle) orelse {
+        return;
+    };
+
+    if (!state.initialized) {
+        log.warn("Attempted to set tint color before renderer initialized", .{});
+        return;
+    }
+
+    if (state.renderer) |*renderer| {
+        renderer.setTintColor(@bitCast(color), alpha);
+    }
+}
+
 /// Get the current terminal grid size (columns and rows)
 /// Java signature: int[] nativeGetGridSize()
 /// Returns [cols, rows] array
@@ -1313,11 +1343,15 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetSelectionBo
 /// Get the visible viewport content as text with VT/ANSI sequences preserved.
 /// This is used by voice command interceptor for environment detection.
 /// Java signature: String nativeGetViewportTextVT()
-/// Returns the viewport text with SGR sequences or null on error
+/// Returns the viewport text for voice command detection
+/// Limited to last 1000 bytes due to JNI newJString buffer limit
 export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetViewportTextVT(
     env: *c.JNIEnv,
     obj: c.jobject,
 ) c.jstring {
+    // JNI newJString has a 1024 byte buffer limit, keep under that
+    const MAX_SIZE: usize = 1000;
+
     const handle = getNativeHandle(env, obj);
 
     if (handle == 0) {
@@ -1340,8 +1374,15 @@ export fn Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetViewportTex
 
         if (text) |txt| {
             defer gpa.allocator().free(txt);
-            return jni.newJString(env, txt) catch |err| {
-                log.err("Failed to create JNI string for viewport text VT: {}", .{err});
+
+            // Take the end of the text (most recent content with prompt)
+            const truncated: []const u8 = if (txt.len > MAX_SIZE)
+                txt[txt.len - MAX_SIZE ..]
+            else
+                txt;
+
+            return jni.newJString(env, truncated) catch |err| {
+                log.err("Failed to create JNI string: {}", .{err});
                 return null;
             };
         }
@@ -1424,6 +1465,8 @@ comptime {
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetShowFps;
     // Mic indicator
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetMicIndicatorState;
+    // Tint overlay
+    _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeSetTintColor;
     // Grid size
     _ = Java_com_ghostty_android_renderer_GhosttyRenderer_nativeGetGridSize;
     // Selection methods

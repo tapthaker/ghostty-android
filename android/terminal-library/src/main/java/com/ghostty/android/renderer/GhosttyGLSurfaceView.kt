@@ -1065,6 +1065,23 @@ class GhosttyGLSurfaceView @JvmOverloads constructor(
     fun getMicIndicatorState(): MicIndicatorState = micIndicatorState
 
     /**
+     * Set a tint overlay color for session differentiation.
+     *
+     * The tint is rendered as a semi-transparent full-screen overlay on top of
+     * all terminal content, allowing different sessions to have distinct visual
+     * appearances.
+     *
+     * @param color ARGB color (e.g., 0xFF4CAF50 for green)
+     * @param alpha Opacity from 0.0 (invisible) to 1.0 (fully opaque), typically 0.15 for subtle tint
+     */
+    fun setTintColor(color: Int, alpha: Float) {
+        queueEvent {
+            renderer.setTintColor(color, alpha)
+            requestRender()
+        }
+    }
+
+    /**
      * Set the maximum bottom offset (keyboard height).
      *
      * When set to a positive value, the user can swipe up at the bottom

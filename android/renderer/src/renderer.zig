@@ -91,6 +91,15 @@ ripple_pipeline: Pipeline,
 /// Sweep effect rendering pipeline (full-screen pass)
 sweep_pipeline: Pipeline,
 
+/// Tint overlay rendering pipeline (full-screen pass for session differentiation)
+tint_pipeline: Pipeline,
+
+/// Tint color (RGBA packed as u32) - set via setTintColor()
+tint_color: u32 = 0,
+
+/// Tint alpha (0.0 = invisible, 1.0 = fully opaque)
+tint_alpha: f32 = 0.0,
+
 /// Number of glyphs to render (for testing)
 num_test_glyphs: u32 = 0,
 
@@ -439,6 +448,18 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16, ini
     });
     errdefer sweep_pipeline.deinit();
 
+    // Load and compile tint overlay shaders
+    const tint_vertex_src = shader_module.loadShaderCode("shaders/glsl/full_screen.v.glsl");
+    const tint_fragment_src = shader_module.loadShaderCode("shaders/glsl/tint_overlay.f.glsl");
+
+    // Create tint overlay pipeline (full-screen pass with blending for session differentiation)
+    const tint_pipeline = try Pipeline.init(null, .{
+        .vertex_src = tint_vertex_src,
+        .fragment_src = tint_fragment_src,
+        .blending_enabled = true, // Blend tint over everything
+    });
+    errdefer tint_pipeline.deinit();
+
     // Extract terminal state and sync to GPU
     // (This will be done in a temporary renderer-like struct before full init)
     _ = 0; // Reserved for future test glyph count
@@ -523,12 +544,14 @@ pub fn init(allocator: std.mem.Allocator, width: u32, height: u32, dpi: u16, ini
         .cell_text_pipeline = cell_text_pipeline,
         .ripple_pipeline = ripple_pipeline,
         .sweep_pipeline = sweep_pipeline,
+        .tint_pipeline = tint_pipeline,
         .num_test_glyphs = 0,
     };
 }
 
 pub fn deinit(self: *Self) void {
     log.info("Destroying renderer", .{});
+    self.tint_pipeline.deinit();
     self.sweep_pipeline.deinit();
     self.ripple_pipeline.deinit();
     self.cell_text_pipeline.deinit();
@@ -837,6 +860,22 @@ pub fn render(self: *Self) !void {
     }
 
     // ============================================================================
+    // Tint Overlay Pass (session differentiation - rendered on top of effects)
+    // ============================================================================
+    if (self.tint_alpha > 0.0) {
+        // Update tint uniforms
+        self.uniforms.tint_color_packed_4u8 = self.tint_color;
+        self.uniforms.tint_alpha = self.tint_alpha;
+        try self.syncUniforms();
+
+        self.tint_pipeline.use();
+        gl.drawArrays(gl.GL_TRIANGLES, 0, 3);
+        gl.checkError() catch |err| {
+            log.warn("GL error after tint rendering: {}", .{err});
+        };
+    }
+
+    // ============================================================================
     // FPS Overlay Pass (rendered with scroll_pixel_offset=0 to stay fixed)
     // ============================================================================
     if (self.num_fps_glyphs > 0) {
@@ -893,6 +932,29 @@ pub fn render(self: *Self) !void {
 /// Update background color
 pub fn setBackgroundColor(self: *Self, r: u8, g: u8, b: u8, a: u8) void {
     self.uniforms.bg_color_packed_4u8 = shaders.Uniforms.pack4u8(r, g, b, a);
+}
+
+/// Accent line height in pixels (must match ACCENT_THICKNESS in tint_overlay.f.glsl)
+const ACCENT_LINE_HEIGHT: f32 = 3.0;
+/// Padding below the accent line
+const ACCENT_LINE_PADDING: f32 = 2.0;
+
+/// Set tint overlay color for session differentiation
+/// The color is applied as a thin accent line at the top of the terminal
+/// @param color ARGB color packed as u32 (e.g., 0xFF4CAF50 for green)
+/// @param alpha Opacity from 0.0 (invisible) to 1.0 (fully opaque)
+pub fn setTintColor(self: *Self, color: u32, alpha: f32) void {
+    self.tint_color = color;
+    self.tint_alpha = alpha;
+
+    // Adjust top grid padding to make room for the accent line
+    if (alpha > 0.0) {
+        self.uniforms.grid_padding[0] = ACCENT_LINE_HEIGHT + ACCENT_LINE_PADDING;
+    } else {
+        self.uniforms.grid_padding[0] = 0.0;
+    }
+
+    log.info("Tint color set: 0x{X:0>8}, alpha: {d:.2}, top_padding: {d:.1}", .{ color, alpha, self.uniforms.grid_padding[0] });
 }
 
 /// Update font size dynamically by rebuilding the font system and atlases

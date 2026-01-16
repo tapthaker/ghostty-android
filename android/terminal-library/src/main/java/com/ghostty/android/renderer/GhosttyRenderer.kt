@@ -97,6 +97,9 @@ class GhosttyRenderer(
     // Mic indicator native method
     private external fun nativeSetMicIndicatorState(state: Int)
 
+    // Tint overlay native method
+    private external fun nativeSetTintColor(color: Int, alpha: Float)
+
     // Selection native methods
     private external fun nativeGetCellSize(): FloatArray
     private external fun nativeStartSelection(col: Int, row: Int)
@@ -624,6 +627,28 @@ class GhosttyRenderer(
             nativeSetMicIndicatorState(state)
         } catch (e: Exception) {
             Log.e(TAG, "Error in nativeSetMicIndicatorState", e)
+        }
+    }
+
+    // ============================================================================
+    // Tint Overlay API (Session Differentiation)
+    // ============================================================================
+
+    /**
+     * Set a tint overlay color for session differentiation.
+     *
+     * The tint is rendered as a semi-transparent full-screen overlay on top of
+     * all terminal content, allowing different sessions to have distinct visual
+     * appearances.
+     *
+     * @param color ARGB color (e.g., 0xFF4CAF50 for green)
+     * @param alpha Opacity from 0.0 (invisible) to 1.0 (fully opaque), typically 0.15 for subtle tint
+     */
+    fun setTintColor(color: Int, alpha: Float) {
+        try {
+            nativeSetTintColor(color, alpha)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in nativeSetTintColor", e)
         }
     }
 
